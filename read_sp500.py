@@ -1,5 +1,5 @@
 from functools import lru_cache, reduce
-import pandas as pd
+import csv
 
 def read_sp500_data(csv_path='data/sp500.csv'):
     """
@@ -9,11 +9,15 @@ def read_sp500_data(csv_path='data/sp500.csv'):
         csv_path (str): Path to the S&P 500 CSV file
         
     Returns:
-        pandas.DataFrame: DataFrame containing S&P 500 data
+        list: List of dictionaries containing S&P 500 data
     """
     try:
-        df = pd.read_csv(csv_path)
-        return df
+        data = []
+        with open(csv_path, 'r', newline='', encoding='utf-8-sig') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                data.append(row)
+        return data
     except FileNotFoundError:
         print(f"Error: Could not find file {csv_path}")
         return None
@@ -26,22 +30,32 @@ def extract_year_end_sp500_data(sp500_data, month=12):
     Process S&P 500 data by converting dates and extracting yearly data.
     
     Args:
-        sp500_data (pandas.DataFrame): Raw S&P 500 data
+        sp500_data (list): Raw S&P 500 data as list of dictionaries
         
     Returns:
-        pandas.DataFrame: Processed S&P 500 data with yearly records
+        list: Processed S&P 500 data with yearly records
     """
     if sp500_data is not None:
+        from datetime import datetime
+        
         # Convert Date column to datetime if it exists
-        if 'Date' in sp500_data.columns:
-            sp500_data['Date'] = pd.to_datetime(sp500_data['Date'])
-            sp500_data['Year'] = sp500_data['Date'].dt.year
-            sp500_data['Month'] = sp500_data['Date'].dt.month
-            
-            # Get the last month data of each year (December data)
-            sp500_year_data = sp500_data[sp500_data['Month'] == month].copy()
-        else:
-            sp500_year_data = sp500_data
+        for row in sp500_data:
+            if 'Date' in row:
+                try:
+                    date_obj = datetime.strptime(row['Date'], '%Y-%m-%d')
+                    row['Year'] = date_obj.year
+                    row['Month'] = date_obj.month
+                except ValueError:
+                    # Try alternative date formats
+                    try:
+                        date_obj = datetime.strptime(row['Date'], '%m/%d/%Y')
+                        row['Year'] = date_obj.year
+                        row['Month'] = date_obj.month
+                    except ValueError:
+                        continue
+        
+        # Get the specified month data of each year
+        sp500_year_data = [row for row in sp500_data if row.get('Month') == month]
     else:
         sp500_year_data = None
     
@@ -52,51 +66,60 @@ def compute_annual_change_rate(sp500_year_data):
     Compute annual change rate for S&P 500 data.
     
     Args:
-        sp500_year_data (pandas.DataFrame): Yearly S&P 500 data
+        sp500_year_data (list): Yearly S&P 500 data as list of dictionaries
         
     Returns:
-        pandas.DataFrame: DataFrame with annual change rates added
+        list: List of dictionaries with annual change rates added
     """
-    if sp500_year_data is None or sp500_year_data.empty:
+    if sp500_year_data is None or len(sp500_year_data) == 0:
         return None
     
     # Make a copy to avoid modifying the original data
-    df = sp500_year_data.copy()
+    data = [row.copy() for row in sp500_year_data]
     
     # Sort by year to ensure proper order
-    df = df.sort_values('Year').reset_index(drop=True)
+    data.sort(key=lambda x: x.get('Year', 0))
     
     # Calculate annual change rate
     # Using the 'Value' column for S&P 500 data
     price_column = 'Value'
     
-    if price_column not in df.columns:
+    if not any(price_column in row for row in data):
         print("Warning: Could not find 'Value' column")
-        return df
+        return data
     
     # Calculate year-over-year change rate
-    df['Change_Rate'] = df[price_column].pct_change()
+    for i, row in enumerate(data):
+        if i == 0:
+            row['Change_Rate'] = None  # First row has no previous year
+        else:
+            try:
+                current_value = float(row[price_column])
+                previous_value = float(data[i-1][price_column])
+                if previous_value != 0:
+                    row['Change_Rate'] = (current_value - previous_value) / previous_value
+                else:
+                    row['Change_Rate'] = None
+            except (ValueError, KeyError):
+                row['Change_Rate'] = None
     
-    return df
+    return data
 
 def filter_sp500_data_after_1960(sp500_year_data):
     """
     Filter S&P 500 data to only include years 1960 and after.
     
     Args:
-        sp500_year_data (pandas.DataFrame): S&P 500 yearly data
+        sp500_year_data (list): S&P 500 yearly data as list of dictionaries
         
     Returns:
-        pandas.DataFrame: Filtered data with years >= 1960, or None if input is None
+        list: Filtered data with years >= 1960, or None if input is None
     """
-    if sp500_year_data is None or sp500_year_data.empty:
+    if sp500_year_data is None or len(sp500_year_data) == 0:
         return None
     
     # Filter data to only include years 1960 and after
-    filtered_data = sp500_year_data[sp500_year_data['Year'] >= 1960].copy()
-    
-    # Reset index after filtering
-    filtered_data = filtered_data.reset_index(drop=True)
+    filtered_data = [row for row in sp500_year_data if row.get('Year', 0) >= 1960]
     
     return filtered_data
 
@@ -113,17 +136,21 @@ def get_change_rate_by_year(year):
     """
     sp500_data = data()
     
-    if sp500_data is None or sp500_data.empty:
+    if sp500_data is None or len(sp500_data) == 0:
         return None
     
     # Find the row for the given year
-    year_row = sp500_data[sp500_data['Year'] == year]
+    year_row = None
+    for row in sp500_data:
+        if row.get('Year') == year:
+            year_row = row
+            break
     
-    if year_row.empty:
+    if year_row is None:
         return None
     
     # Return the change rate for that year
-    return year_row['Change_Rate'].iloc[0]
+    return year_row.get('Change_Rate')
 
 
 @lru_cache(maxsize=None)
@@ -139,7 +166,7 @@ def data():
 def gui_sp500_data():
     import tkinter as tk
     from tkinter import ttk
-    import pandas as pd
+    
     def create_gui():
         root = tk.Tk()
         root.title("S&P 500 Data Analyzer")
@@ -147,7 +174,7 @@ def gui_sp500_data():
         
         # Get data
         sp500_data = data()
-        data_length = len(sp500_data)
+        data_length = len(sp500_data) if sp500_data else 0
         
         # Create main frames
         main_frame = ttk.Frame(root, padding="10")
@@ -197,6 +224,9 @@ def gui_sp500_data():
         result_label.grid(row=5, column=0, columnspan=3, pady=10)
         
         def update_display(*args):
+            if not sp500_data:
+                return
+                
             offset = offset_var.get()
             start = start_var.get()
             end = end_var.get()
@@ -224,16 +254,19 @@ def gui_sp500_data():
             end = max(start + 1, min(end, data_length))
             
             # Get subset of data
-            subset_data = sp500_data.iloc[start:end]
+            subset_data = sp500_data[start:end]
             
             # Update year range label
-            if not subset_data.empty and 'Year' in subset_data.columns:
-                start_year = subset_data['Year'].min()
-                end_year = subset_data['Year'].max()
-                years_list = sorted(subset_data['Year'].unique())
-                # years_str = ', '.join(map(str, years_list))
-                years_str = str(len(years_list))
-                year_range_label.config(text=f"Year Range: {start_year} - {end_year} | Years: {years_str}")
+            if subset_data:
+                years = [row.get('Year') for row in subset_data if row.get('Year') is not None]
+                if years:
+                    start_year = min(years)
+                    end_year = max(years)
+                    unique_years = list(set(years))
+                    years_str = str(len(unique_years))
+                    year_range_label.config(text=f"Year Range: {start_year} - {end_year} | Years: {years_str}")
+                else:
+                    year_range_label.config(text="Year Range: N/A")
             else:
                 year_range_label.config(text="Year Range: N/A")
             
@@ -241,29 +274,31 @@ def gui_sp500_data():
             text_widget.delete(1.0, tk.END)
             
             # Display data
-            if not subset_data.empty:
+            if subset_data:
                 text_widget.insert(tk.END, "Selected Data:\n")
                 text_widget.insert(tk.END, "=" * 50 + "\n")
-                text_widget.insert(tk.END, subset_data.to_string())
-                text_widget.insert(tk.END, "\n\n")
+                
+                # Format data for display
+                for i, row in enumerate(subset_data):
+                    text_widget.insert(tk.END, f"Row {start + i}:\n")
+                    for key, value in row.items():
+                        text_widget.insert(tk.END, f"  {key}: {value}\n")
+                    text_widget.insert(tk.END, "\n")
                 
                 # Calculate and display reduced result
-                if 'Change_Rate' in subset_data.columns:
-                    change_rates = subset_data['Change_Rate'].dropna()
-                    if not change_rates.empty:
-                        result = reduce(lambda x, y: x * (1 + y), change_rates, 1)
-                        
-                        # Calculate annual return rate
-                        num_years = len(change_rates)
-                        if num_years > 1:
-                            annual_return = (result ** (1/num_years)) - 1
-                            result_label.config(text=f"Cumulative Growth Factor: {result:.6f} | Annual Return: {annual_return:.4%}")
-                        else:
-                            result_label.config(text=f"Cumulative Growth Factor: {result:.6f}")
+                change_rates = [row.get('Change_Rate') for row in subset_data if row.get('Change_Rate') is not None]
+                if change_rates:
+                    result = reduce(lambda x, y: x * (1 + y), change_rates, 1)
+                    
+                    # Calculate annual return rate
+                    num_years = len(change_rates)
+                    if num_years > 1:
+                        annual_return = (result ** (1/num_years)) - 1
+                        result_label.config(text=f"Cumulative Growth Factor: {result:.6f} | Annual Return: {annual_return:.4%}")
                     else:
-                        result_label.config(text="No valid change rate data in selection")
+                        result_label.config(text=f"Cumulative Growth Factor: {result:.6f}")
                 else:
-                    result_label.config(text="Change_Rate column not found")
+                    result_label.config(text="No valid change rate data in selection")
             else:
                 text_widget.insert(tk.END, "No data in selected range")
                 result_label.config(text="")
@@ -305,4 +340,5 @@ def gui_sp500_data():
 
 if __name__ == "__main__":
     # gui_sp500_data()
+    print(data())
     print(get_change_rate_by_year(2010))
