@@ -120,7 +120,7 @@ def get_change_rate_by_year(year):
     year_row = sp500_data[sp500_data['Year'] == year]
     
     if year_row.empty:
-        return 0.02
+        return None
     
     # Return the change rate for that year
     return year_row['Change_Rate'].iloc[0]

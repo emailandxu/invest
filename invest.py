@@ -114,6 +114,8 @@ def main():
 
         # Create subplots
         plt.figure(figsize=(12, 10))
+
+        plt.suptitle(f'Investment Analysis Dashboard ({series("year")[0]}-{series("year")[-1]})', fontsize=16, fontweight='bold')
         plt.subplot(2, 3, 1)
         plt.plot(series('year'), series('total'), marker='o', linewidth=2, markersize=6)
         plt.title('Total Amount Over Time')
@@ -179,10 +181,10 @@ def main():
     )
 
     usd = lambda x: x #* 7.2 / 12
-    start_year = 1995
+    start_year = 1999
     end_year = start_year + 30
     retire_year = start_year + 0
-    market_rate_year = start_year + 3
+    market_rate_year = start_year + 0
 
     from read_sp500 import get_change_rate_by_year
 
@@ -194,7 +196,8 @@ def main():
         principles=lambda year: usd(3)  if year < retire_year else (usd(0) if year < retire_year + 10 else usd(0)), 
         # 这里使用正态分布模拟市场震荡，均值为0.0675，标准差为0.0059， 数据来自chatgpt，模型和参数都不准确，待未来优化
         # interest_rate=lambda year: 0.04 if year < market_rate_year else random.normalvariate(0.0675, 0.0059),  
-        interest_rate=lambda year: get_change_rate_by_year(year), #0.018,
+        interest_rate=lambda year: get_change_rate_by_year(year) if get_change_rate_by_year(year) is not None else 0.02, #0.018,
+        # interest_rate=0.02,
         withdraw_rate=lambda year,total: 0.00 if year < retire_year else ((usd(1.2) / total) * (1+0.03)**(year-retire_year)), 
         total=usd(30), 
         interest_total=0.0
