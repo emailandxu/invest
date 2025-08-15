@@ -124,7 +124,7 @@ def filter_sp500_data_after_1960(sp500_year_data):
     return filtered_data
 
 
-def get_change_rate_by_year(year):
+def get_change_rate_by_year(year, default=None):
     """
     Get the change rate for a specific year from S&P 500 data.
     
@@ -147,7 +147,7 @@ def get_change_rate_by_year(year):
             break
     
     if year_row is None:
-        return None
+        return default
     
     # Return the change rate for that year
     return year_row.get('Change_Rate')
