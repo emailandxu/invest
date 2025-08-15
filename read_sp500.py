@@ -294,7 +294,9 @@ def gui_sp500_data():
                     num_years = len(change_rates)
                     if num_years > 1:
                         annual_return = (result ** (1/num_years)) - 1
-                        result_label.config(text=f"Cumulative Growth Factor: {result:.6f} | Annual Return: {annual_return:.4%}")
+                        mean_change_rate = sum(change_rates) / len(change_rates)
+                        std_change_rate = (sum((x - mean_change_rate) ** 2 for x in change_rates) / len(change_rates)) ** 0.5
+                        result_label.config(text=f"Cumulative Growth Factor: {result:.6f} | Annual Return: {annual_return:.4%} | Mean: {mean_change_rate:.4%} | Std: {std_change_rate:.4%}")
                     else:
                         result_label.config(text=f"Cumulative Growth Factor: {result:.6f}")
                 else:
@@ -339,6 +341,6 @@ def gui_sp500_data():
     create_gui()
 
 if __name__ == "__main__":
-    # gui_sp500_data()
+    gui_sp500_data()
     print(data())
     print(get_change_rate_by_year(2010))
