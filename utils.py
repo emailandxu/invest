@@ -1,3 +1,5 @@
+USD = lambda x: x * 7.2
+
 def print_table(years_result):
     columns = list(years_result[0].keys())
     col_widths = {col: max(len(col), max(len(f"{row[col]:.4f}" if isinstance(row[col], float) else str(row[col])) for row in years_result)) for col in columns}
