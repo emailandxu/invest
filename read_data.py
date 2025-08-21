@@ -230,7 +230,7 @@ def get_value_by_year(data, year, default=None):
 
 @lru_cache(maxsize=None)
 def sp500_data():
-    data = read_data()
+    data = read_data(csv_path="data/sp500.csv")
     year_data = extract_year_end_data_by_month(data, month=12)
     year_data = compute_annual_change_rate(year_data)
     # year_data = filter_data_after_1960(year_data)

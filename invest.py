@@ -1,7 +1,7 @@
 import random
 import numpy as np
 from functools import reduce
-from read_sp500 import get_change_rate_by_year, get_value_by_year, sp500_data, interest_data, inflation_data
+from read_data import get_change_rate_by_year, get_value_by_year, sp500_data, interest_data, inflation_data
 
 USD = lambda x: x #* 7.2 / 12
 
