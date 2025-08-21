@@ -1,36 +1,3 @@
-# 投资模拟分析报告 | Investment Simulation Analysis Report
-# 
-# 基于本脚本的投资模拟结果，以下是主要发现和结论：
-# Based on the investment simulation results from this script, here are the main findings and conclusions:
-#
-# 1. 模拟参数设置： | Simulation Parameter Settings:
-#    - 模拟期间：30年 | Simulation period: 30 years
-#    - 退休年份：第5年 | Retirement year: Year 5
-#    - 初始资金：9万美元（约64.8万人民币，按1:7.2汇率）| Initial funds: $90,000 (~648,000 RMB at 1:7.2 exchange rate)
-#    - 退休前年收入结余：3万美元/年（约21.6万人民币）| Annual income surplus before retirement: $30,000/year (~216,000 RMB)
-#    - 退休后年收入：0 | Annual income after retirement: 0
-#
-# 2. 投资回报率模型： | Investment Return Rate Model:
-#    - 退休前2.5年：固定4%年化收益率（保守投资策略）| First 2.5 years before retirement: Fixed 4% annual return (conservative investment strategy)
-#    - 退休后：正态分布随机收益率，均值6.75%，标准差0.59%（模拟市场波动）| After retirement: Normally distributed random return rate, mean 6.75%, std dev 0.59% (simulating market volatility)
-#
-# 3. 提取策略： | Withdrawal Strategy:
-#    - 退休前：不提取资金 | Before retirement: No fund withdrawal
-#    - 退休后：动态提取率，基于通胀调整的生活费需求 | After retirement: Dynamic withdrawal rate based on inflation-adjusted living expense needs
-#    - 提取公式：(目标年支出 / 当前总资产 * 基准率) * 通胀调整系数 | Withdrawal formula: (target annual expenses / current total assets * base rate) * inflation adjustment factor
-#
-# 4. 关键结论： | Key Conclusions:
-#    - 资金池的可持续性高度依赖于提取率与市场收益率的关系 | The sustainability of the fund pool is highly dependent on the relationship between withdrawal rate and market return rate
-#    - 当提取率超过市场长期平均收益率时，资金池存在耗尽风险 | When withdrawal rate exceeds the long-term average market return rate, there is a risk of fund depletion
-#    - 在市场低迷期间，应当考虑降低提取率（即调整生活标准）以保护本金 | During market downturns, consider reducing withdrawal rate (i.e., adjusting living standards) to protect principal
-#    - 退休初期的资金积累阶段对长期财务安全至关重要 | The fund accumulation phase in early retirement is crucial for long-term financial security
-#
-# 5. 风险提示： | Risk Warnings:
-#    - 本模拟使用的市场收益率参数来源于ChatGPT，可能不够准确 | The market return rate parameters used in this simulation come from ChatGPT and may not be accurate enough
-#    - 实际市场波动可能更加复杂，包含系统性风险和黑天鹅事件 | Actual market volatility may be more complex, including systemic risks and black swan events
-#    - 通胀率、税收、医疗支出等因素未充分考虑 | Factors such as inflation rate, taxes, and medical expenses are not fully considered
-#    - 建议结合更多历史数据和专业财务规划进行决策 | It is recommended to combine more historical data and professional financial planning for decision-making
-
 import random
 import numpy as np
 from functools import reduce
@@ -120,7 +87,6 @@ def invest_gui():
             # Create control and plot areas
             self.create_controls(main_layout)
             self.create_plots(main_layout)
-            self.create_result(main_layout)
             # Initialize default values
             self.set_defaults()
             
@@ -128,14 +94,18 @@ def invest_gui():
             self.update_simulation()
         
         def create_controls(self, main_layout):
+            CONTROL_PANEL_WIDTH = 250
+
             # Control panel
             control_widget = QWidget()
-            control_widget.setFixedWidth(250)
+            control_widget.setFixedWidth(CONTROL_PANEL_WIDTH)
             control_layout = QVBoxLayout(control_widget)
             
             # Parameter grid
             grid_widget = QWidget()
+            grid_widget.setFixedWidth(CONTROL_PANEL_WIDTH)
             grid_layout = QGridLayout(grid_widget)
+            
             
             # Default parameter values
             self.default_start_year = 1995
@@ -153,7 +123,6 @@ def invest_gui():
             row = 0
             
             # Start Year
-            grid_layout.addWidget(QLabel("Start Year:"), row, 0)
             self.start_year_slider = QSlider(Qt.Horizontal)
             self.start_year_slider.setRange(1970, 2100)
             self.start_year_slider.valueChanged.connect(self.update_simulation)
@@ -163,7 +132,6 @@ def invest_gui():
             grid_layout.addWidget(self.start_year_label, row, 1)
             row += 1
             # Duration
-            grid_layout.addWidget(QLabel("Duration (years):"), row, 0)
             self.duration_slider = QSlider(Qt.Horizontal)
             self.duration_slider.setRange(0, 99)
             self.duration_slider.valueChanged.connect(self.update_simulation)
@@ -173,7 +141,6 @@ def invest_gui():
             grid_layout.addWidget(self.duration_label, row, 1)
             row += 1
             # Retirement Offset
-            grid_layout.addWidget(QLabel("Retirement Offset:"), row, 0)
             self.retire_offset_slider = QSlider(Qt.Horizontal)
             self.retire_offset_slider.setRange(0, 99)
             self.retire_offset_slider.valueChanged.connect(self.update_simulation)
@@ -183,7 +150,6 @@ def invest_gui():
             grid_layout.addWidget(self.retire_offset_label, row, 1)
             row += 1
             # Start Total
-            grid_layout.addWidget(QLabel("Start Total:"), row, 0)
             self.start_total_slider = QSlider(Qt.Horizontal)
             self.start_total_slider.setRange(0, 2000)  # Scale by 10 for decimal precision
             self.start_total_slider.valueChanged.connect(self.update_simulation)
@@ -193,7 +159,6 @@ def invest_gui():
             grid_layout.addWidget(self.start_total_label, row, 1)
             row += 1
             # Annual Cost
-            grid_layout.addWidget(QLabel("Annual Cost:"), row, 0)
             self.cost_slider = QSlider(Qt.Horizontal)
             self.cost_slider.setRange(0, 500)  # Scale by 100 for decimal precision
             self.cost_slider.valueChanged.connect(self.update_simulation)
@@ -203,7 +168,6 @@ def invest_gui():
             grid_layout.addWidget(self.cost_label, row, 1)
             row += 1
             # CPI
-            grid_layout.addWidget(QLabel("CPI:"), row, 0)
             self.cpi_slider = QSlider(Qt.Horizontal)
             self.cpi_slider.setRange(0, 1000)  # Scale by 10000 for decimal precision
             self.cpi_slider.valueChanged.connect(self.update_simulation)
@@ -213,7 +177,6 @@ def invest_gui():
             grid_layout.addWidget(self.cpi_label, row, 1)
             row += 1
             # Interest Rate
-            grid_layout.addWidget(QLabel("Interest Rate:"), row, 0)
             self.interest_rate_slider = QSlider(Qt.Horizontal)
             self.interest_rate_slider.setRange(0, 1500)  # Scale by 10000 for decimal precision
             self.interest_rate_slider.valueChanged.connect(self.update_simulation)
@@ -223,7 +186,6 @@ def invest_gui():
             grid_layout.addWidget(self.interest_rate_label, row, 1)
             row += 1
             # Principle Amount
-            grid_layout.addWidget(QLabel("Annual Savings:"), row, 0)
             self.new_savings_slider = QSlider(Qt.Horizontal)
             self.new_savings_slider.setRange(0, 1000)  # Scale by 100 for decimal precision
             self.new_savings_slider.valueChanged.connect(self.update_simulation)
@@ -233,7 +195,6 @@ def invest_gui():
             grid_layout.addWidget(self.new_savings_label, row, 1)
             row += 1
             
-
             # Real Data checkboxes
             real_data_widget = QWidget()
             real_data_layout = QGridLayout(real_data_widget)
@@ -249,16 +210,28 @@ def invest_gui():
             self.use_sp500_checkbox = QCheckBox(text="sp500")
             self.use_sp500_checkbox.stateChanged.connect(self.update_simulation)
             real_data_layout.addWidget(self.use_sp500_checkbox, 0, 3)
-            
             grid_layout.addWidget(real_data_widget, row, 0, 1, 2)
 
-            control_layout.addWidget(grid_widget)
-            
             # Reset button
-            reset_button = QPushButton("Reset to Defaults")
+            reset_button = QPushButton("Reset")
+            reset_button.setFixedWidth(CONTROL_PANEL_WIDTH)
             reset_button.clicked.connect(self.reset_to_defaults)
-            control_layout.addWidget(reset_button)
+
+            control_layout.addWidget(grid_widget)
+            # Results display
+            result_widget = QWidget()
+            result_widget.setFixedWidth(CONTROL_PANEL_WIDTH)
+            result_layout = QVBoxLayout(result_widget)
+            result_layout.setContentsMargins(0, 0, 0, 0)
             
+            self.results_text = QTextEdit()
+            self.results_text.setReadOnly(True)
+            result_layout.addWidget(self.results_text)
+            
+            control_layout.addWidget(result_widget)
+
+            control_layout.addWidget(reset_button)
+
             main_layout.addWidget(control_widget)
         
         def create_plots(self, main_layout):
@@ -309,19 +282,6 @@ def invest_gui():
             
             main_layout.addWidget(plot_widget)
 
-        def create_result(self, main_layout):
-            # Results display
-            result_widget = QWidget()
-            result_widget.setFixedWidth(250)
-            result_layout = QVBoxLayout(result_widget)
-            
-            self.results_text = QTextEdit()
-            # self.results_text.setMaximumHeight(150)
-            self.results_text.setReadOnly(True)
-            result_layout.addWidget(self.results_text)
-            
-            main_layout.addWidget(result_widget)
-
         def set_defaults(self):
             self.start_year_slider.setValue(self.default_start_year)
             self.duration_slider.setValue(self.default_duration)
@@ -340,14 +300,14 @@ def invest_gui():
             self.update_simulation()
         
         def update_labels(self):
-            self.start_year_label.setText(str(self.start_year_slider.value()))
-            self.duration_label.setText(str(self.duration_slider.value()))
-            self.retire_offset_label.setText(str(self.retire_offset_slider.value()))
-            self.start_total_label.setText(f"{self.start_total_slider.value() / 10:.1f}")
-            self.cost_label.setText(f"{self.cost_slider.value() / 100:.2f}")
-            self.cpi_label.setText(f"{self.cpi_slider.value() / 10000:.3f}")
-            self.interest_rate_label.setText(f"{self.interest_rate_slider.value() / 10000:.3f}")
-            self.new_savings_label.setText(f"{self.new_savings_slider.value() / 100:.2f}")
+            self.start_year_label.setText(f"From: {self.start_year_slider.value()}")
+            self.duration_label.setText(f"Span: {self.duration_slider.value()}")
+            self.retire_offset_label.setText(f"Retire: {self.retire_offset_slider.value()}")
+            self.start_total_label.setText(f"Invest: {self.start_total_slider.value() / 10:.1f}")
+            self.cost_label.setText(f"Cost: {self.cost_slider.value() / 100:.2f}")
+            self.cpi_label.setText(f"CPI: {self.cpi_slider.value() / 10000:.3f}")
+            self.interest_rate_label.setText(f"Int.: {self.interest_rate_slider.value() / 10000:.3f}")
+            self.new_savings_label.setText(f"Gain: {self.new_savings_slider.value() / 100:.2f}")
         
         def update_simulation(self):
             self.update_labels()
@@ -410,7 +370,7 @@ def invest_gui():
                 self.plot_ratio.clear()
                 
                 # Plot results
-                series = lambda key: [row[key] for row in years_result]
+                series = lambda key, func=lambda v: v: [func(row[key]) for row in years_result]
                 years = series('year')
                 
                 # Plot 1: Total Amount
@@ -418,11 +378,11 @@ def invest_gui():
                                    symbol='o', symbolSize=4, symbolBrush='blue')
                 
                 # Plot 2: Interest Rate
-                self.plot_interest_rate.plot(years, series('interest_rate'), pen=pg.mkPen(color='green', width=2), 
+                self.plot_interest_rate.plot(years, series('interest_rate', lambda v: round(v, 4)), pen=pg.mkPen(color='green', width=2), 
                                            symbol='s', symbolSize=4, symbolBrush='green')
                 
                 # Plot 3: Withdraw Rate
-                self.plot_withdrawed_interest_rate.plot(years, series('withdrawed_interest_rate'), pen=pg.mkPen(color='orange', width=2), 
+                self.plot_withdrawed_interest_rate.plot(years, series('withdrawed_interest_rate', lambda v: round(v, 4)), pen=pg.mkPen(color='orange', width=2), 
                                            symbol='x', symbolSize=4, symbolBrush='orange')
                 
                 # Plot 4: Annual Interest
@@ -430,7 +390,7 @@ def invest_gui():
                                       symbol='t', symbolSize=4, symbolBrush='purple')
                 
                 # Plot 5: Annual Withdrawals
-                self.plot_withdraw.plot(years, series('withdraw'), pen=pg.mkPen(color='brown', width=2), 
+                self.plot_withdraw.plot(years, series('withdraw', lambda v: round(v, 2)), pen=pg.mkPen(color='brown', width=2), 
                                       symbol='h', symbolSize=4, symbolBrush='brown')
                 
                 # Plot 6: Interest VS Principle
@@ -449,18 +409,14 @@ def invest_gui():
                     if row['total'] <= row['withdraw']:  # Same threshold as in the invest function
                         zero_year = row['year']
                         break
-                
-                # Build structured results text
-                results_text = "=== SIMULATION RESULTS ===\n\n"
-                
+                results_text = ""
                 # Financial Summary
                 results_text += "💰 FINANCIAL SUMMARY:\n"
                 final_withdraw_total = years_result[-1]['withdraw_total'] if years_result else 0
                 final_interest_total = years_result[-1]['interest_total'] if years_result else 0
-                results_text += f"  • Final Total:         ${final_total:>12,.2f}\n"
-                results_text += f"  • Final Withdraw Total: ${final_withdraw_total:>12,.2f}\n"
-                results_text += f"  • Final Interest Total: ${final_interest_total:>12,.2f}\n"
-                results_text += f"  • Initial Investment:  ${curr_start_total:>12,.2f}\n"
+                results_text += f"  • Final:         {final_total:>12,.2f}$\n"
+                results_text += f"  • Withdraw Total: {final_withdraw_total:>12,.2f}$\n"
+                results_text += f"  • Interest Total: {final_interest_total:>12,.2f}$\n"
                 duration = (curr_end_year if zero_year is None else zero_year) - curr_start_year
                 if duration > 0 and curr_start_total > 0:
                     growth_rate = (((final_total+1e-4) / curr_start_total) ** (1 / duration) - 1)
@@ -468,7 +424,7 @@ def invest_gui():
                     growth_rate = 0.0
                 results_text += f"  • CGAR:  {growth_rate:>12.2%}\n"
                 results_text += "\n"
-                
+
                 # Interest Rate Statistics
                 results_text += "📊 INTEREST RATE STATS:\n"
                 results_text += f"  • Mean Rate:           {mean_rate:>12.3%}\n"
@@ -476,29 +432,23 @@ def invest_gui():
                 results_text += f"  • Min Rate:            {np.min(interest_rates):>12.3%}\n"
                 results_text += f"  • Max Rate:            {np.max(interest_rates):>12.3%}\n"
                 results_text += "\n"
-                
-                # Timeline Information
-                results_text += "⏰ TIMELINE INFO:\n"
-                results_text += f"  • Start Year:          {curr_start_year:>12}\n"
-                results_text += f"  • End Year:            {curr_end_year:>12}\n"
-                results_text += f"  • Retirement Year:     {curr_retire_year:>12}\n"
-                results_text += f"  • Years Simulated:     {len(years_result):>12}\n"
-                results_text += f"  • Years to Retirement: {curr_retire_year - curr_start_year:>12}\n"
-                results_text += f"  • Years in Retirement: {curr_end_year - curr_retire_year:>12}\n"
-                results_text += "\n"
-                
+
                 # Sustainability Analysis
                 results_text += "🔍 SUSTAINABILITY:\n"
                 if zero_year is not None:
                     years_lasted = zero_year - curr_start_year
                     retirement_years_lasted = zero_year - curr_retire_year
-                    results_text += f"  • Status:              ⚠️  FUNDS DEPLETED\n"
-                    results_text += f"  • Depletion Year:      {zero_year:>12}\n"
+                    results_text += f"  • Status:              😑 DEPLETED\n"
+                    results_text += f"  • Survive Until:      {zero_year:>12}\n"
                     results_text += f"  • Total Years Lasted:  {years_lasted:>12}\n"
                     results_text += f"  • Retirement Years:    {retirement_years_lasted:>12}\n"
                 else:
-                    results_text += f"  • Status:              ✅ SUSTAINABLE\n"
-                    results_text += f"  • Funds Last:          Full Duration\n"
+                    years_lasted = curr_end_year - curr_start_year
+                    retirement_years_lasted = curr_end_year - curr_retire_year
+                    results_text += f"  • Status:              😁 SUSTAINABLE\n"
+                    results_text += f"  • Survive Until:          {curr_end_year:>12}\n"
+                    results_text += f"  • Total Years Lasted:  {years_lasted:>12}\n"
+                    results_text += f"  • Retirement Years:    {retirement_years_lasted:>12}\n"
                 
                 self.results_text.setPlainText(results_text)
                 
