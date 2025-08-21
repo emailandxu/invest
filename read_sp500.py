@@ -1,7 +1,7 @@
 from functools import lru_cache, reduce
 import csv
 
-def read_sp500_data(csv_path='data/sp500.csv'):
+def read_data(csv_path='data/sp500.csv'):
     """
     Read S&P 500 data from CSV file.
     
@@ -25,21 +25,21 @@ def read_sp500_data(csv_path='data/sp500.csv'):
         print(f"Error reading CSV file: {e}")
         return None
 
-def extract_year_end_sp500_data(sp500_data, month=12):
+def extract_year_end_data(data, month=12):
     """
     Process S&P 500 data by converting dates and extracting yearly data.
     
     Args:
-        sp500_data (list): Raw S&P 500 data as list of dictionaries
+        data (list): Raw S&P 500 data as list of dictionaries
         
     Returns:
         list: Processed S&P 500 data with yearly records
     """
-    if sp500_data is not None:
+    if data is not None:
         from datetime import datetime
         
         # Convert Date column to datetime if it exists
-        for row in sp500_data:
+        for row in data:
             if 'Date' in row:
                 try:
                     date_obj = datetime.strptime(row['Date'], '%Y-%m-%d')
@@ -55,27 +55,27 @@ def extract_year_end_sp500_data(sp500_data, month=12):
                         continue
         
         # Get the specified month data of each year
-        sp500_year_data = [row for row in sp500_data if row.get('Month') == month]
+        year_data = [row for row in data if row.get('Month') == month]
     else:
-        sp500_year_data = None
+        year_data = None
     
-    return sp500_year_data
+    return year_data
 
-def compute_annual_change_rate(sp500_year_data):
+def compute_annual_change_rate(year_data):
     """
     Compute annual change rate for S&P 500 data.
     
     Args:
-        sp500_year_data (list): Yearly S&P 500 data as list of dictionaries
+        year_data (list): Yearly S&P 500 data as list of dictionaries
         
     Returns:
         list: List of dictionaries with annual change rates added
     """
-    if sp500_year_data is None or len(sp500_year_data) == 0:
+    if year_data is None or len(year_data) == 0:
         return None
     
     # Make a copy to avoid modifying the original data
-    data = [row.copy() for row in sp500_year_data]
+    data = [row.copy() for row in year_data]
     
     # Sort by year to ensure proper order
     data.sort(key=lambda x: x.get('Year', 0))
@@ -105,26 +105,25 @@ def compute_annual_change_rate(sp500_year_data):
     
     return data
 
-def filter_sp500_data_after_1960(sp500_year_data):
+def filter_data_after_1960(year_data):
     """
     Filter S&P 500 data to only include years 1960 and after.
     
     Args:
-        sp500_year_data (list): S&P 500 yearly data as list of dictionaries
+        year_data (list): S&P 500 yearly data as list of dictionaries
         
     Returns:
         list: Filtered data with years >= 1960, or None if input is None
     """
-    if sp500_year_data is None or len(sp500_year_data) == 0:
+    if year_data is None or len(year_data) == 0:
         return None
     
     # Filter data to only include years 1960 and after
-    filtered_data = [row for row in sp500_year_data if row.get('Year', 0) >= 1960]
+    filtered_data = [row for row in year_data if row.get('Year', 0) >= 1960]
     
     return filtered_data
 
-
-def get_change_rate_by_year(year, default=None):
+def get_change_rate_by_year(data, year, default=None):
     """
     Get the change rate for a specific year from S&P 500 data.
     
@@ -133,15 +132,13 @@ def get_change_rate_by_year(year, default=None):
         
     Returns:
         float: The change rate for the given year, or None if year not found
-    """
-    sp500_data = data()
-    
-    if sp500_data is None or len(sp500_data) == 0:
+    """    
+    if data is None or len(data) == 0:
         return None
     
     # Find the row for the given year
     year_row = None
-    for row in sp500_data:
+    for row in data:
         if row.get('Year') == year:
             year_row = row
             break
@@ -152,18 +149,61 @@ def get_change_rate_by_year(year, default=None):
     # Return the change rate for that year
     return year_row.get('Change_Rate')
 
+def get_value_by_year(data, year, default=None):
+    if data is None or len(data) == 0:
+        return None
+    
+    # Find the row for the given year
+    year_row = None
+    for row in data:
+        if row.get('Year') == year:
+            year_row = row
+            break
+    
+    if year_row is None:
+        return default
+    
+    # Return the change rate for that year
+    return year_row.get('Value')
+
 
 @lru_cache(maxsize=None)
-def data():
-    sp500_data = read_sp500_data()
-    sp500_year_data = extract_year_end_sp500_data(sp500_data, month=6)
-    sp500_year_data = compute_annual_change_rate(sp500_year_data)
-    # sp500_year_data = filter_sp500_data_after_1960(sp500_year_data)
-    return sp500_year_data
+def sp500_data():
+    data = read_data()
+    year_data = extract_year_end_data(data, month=12)
+    year_data = compute_annual_change_rate(year_data)
+    # year_data = filter_data_after_1960(year_data)
+    return year_data
 
+@lru_cache(maxsize=None)
+def interest_data():
+    data = read_data(csv_path="data/interest.csv")
+    year_data = extract_year_end_data(data, month=12)
+    year_data = compute_annual_change_rate(year_data)
+    # Convert value to float, divide by 100, and add 1.0 for interest rate processing
+    for row in year_data:
+        if 'Value' in row and row['Value'] is not None:
+            try:
+                row['Value'] = float(row['Value']) / 100
+            except (ValueError, TypeError):
+                row['Value'] = None
+    return year_data
 
+@lru_cache(maxsize=None)
+def inflation_data():
+    data = read_data(csv_path="data/inflation.csv")
+    year_data = extract_year_end_data(data, month=12)
+    year_data = compute_annual_change_rate(year_data)
+    # Convert value to float, divide by 100, and add 1.0 for interest rate processing
+    for row in year_data:
+        if 'Value' in row and row['Value'] is not None:
+            try:
+                row['Value'] = float(row['Value']) / 100
+            except (ValueError, TypeError):
+                row['Value'] = None
+    return year_data
 
-def gui_sp500_data():
+def gui_data(data):
     import tkinter as tk
     from tkinter import ttk
     
@@ -173,8 +213,7 @@ def gui_sp500_data():
         root.geometry("800x600")
         
         # Get data
-        sp500_data = data()
-        data_length = len(sp500_data) if sp500_data else 0
+        data_length = len(data) if data else 0
         
         # Create main frames
         main_frame = ttk.Frame(root, padding="10")
@@ -224,7 +263,7 @@ def gui_sp500_data():
         result_label.grid(row=5, column=0, columnspan=3, pady=10)
         
         def update_display(*args):
-            if not sp500_data:
+            if not data:
                 return
                 
             offset = offset_var.get()
@@ -254,7 +293,7 @@ def gui_sp500_data():
             end = max(start + 1, min(end, data_length))
             
             # Get subset of data
-            subset_data = sp500_data[start:end]
+            subset_data = data[start:end]
             
             # Update year range label
             if subset_data:
@@ -341,6 +380,6 @@ def gui_sp500_data():
     create_gui()
 
 if __name__ == "__main__":
-    gui_sp500_data()
-    print(data())
+    gui_data(interest_data())
+    print(interest_data())
     print(get_change_rate_by_year(2010))
