@@ -24,8 +24,7 @@ def read_data(csv_path='data/sp500.csv'):
     except Exception as e:
         print(f"Error reading CSV file: {e}")
         return None
-
-def extract_year_end_data(data, month=12):
+def extract_year_end_data_by_month(data, month=12):
     """
     Process S&P 500 data by converting dates and extracting yearly data.
     
@@ -56,6 +55,68 @@ def extract_year_end_data(data, month=12):
         
         # Get the specified month data of each year
         year_data = [row for row in data if row.get('Month') == month]
+    else:
+        year_data = None
+    
+    return year_data
+
+def extract_year_data_by_mean(data):
+    """
+    Process S&P 500 data by converting dates and extracting yearly data using mean values.
+    
+    Args:
+        data (list): Raw S&P 500 data as list of dictionaries
+        
+    Returns:
+        list: Processed S&P 500 data with yearly records averaged
+    """
+    if data is not None:
+        from datetime import datetime
+        
+        # Convert Date column to datetime if it exists
+        for row in data:
+            if 'Date' in row:
+                try:
+                    date_obj = datetime.strptime(row['Date'], '%Y-%m-%d')
+                    row['Year'] = date_obj.year
+                    row['Month'] = date_obj.month
+                except ValueError:
+                    # Try alternative date formats
+                    try:
+                        date_obj = datetime.strptime(row['Date'], '%m/%d/%Y')
+                        row['Year'] = date_obj.year
+                        row['Month'] = date_obj.month
+                    except ValueError:
+                        continue
+        
+        # Group data by year and calculate mean values
+        year_groups = {}
+        for row in data:
+            year = row.get('Year')
+            if year is not None:
+                if year not in year_groups:
+                    year_groups[year] = []
+                year_groups[year].append(row)
+        
+        # Calculate mean values for each year
+        year_data = []
+        for year, rows in year_groups.items():
+            if 'Value' in rows[0]:
+                try:
+                    values = [float(row['Value']) for row in rows if row.get('Value')]
+                    if values:
+                        mean_value = sum(values) / len(values)
+                        year_data.append({
+                            'Date': f"{year}-12-31",  # Use end of year as representative date
+                            'Year': year,
+                            'Month': 12,
+                            'Value': str(mean_value)
+                        })
+                except ValueError:
+                    continue
+        
+        # Sort by year
+        year_data.sort(key=lambda x: x.get('Year', 0))
     else:
         year_data = None
     
@@ -170,7 +231,7 @@ def get_value_by_year(data, year, default=None):
 @lru_cache(maxsize=None)
 def sp500_data():
     data = read_data()
-    year_data = extract_year_end_data(data, month=12)
+    year_data = extract_year_end_data_by_month(data, month=12)
     year_data = compute_annual_change_rate(year_data)
     # year_data = filter_data_after_1960(year_data)
     return year_data
@@ -178,7 +239,8 @@ def sp500_data():
 @lru_cache(maxsize=None)
 def interest_data():
     data = read_data(csv_path="data/interest.csv")
-    year_data = extract_year_end_data(data, month=12)
+    # year_data = extract_year_end_data_by_month(data, month=12)
+    year_data = extract_year_data_by_mean(data)
     year_data = compute_annual_change_rate(year_data)
     # Convert value to float, divide by 100, and add 1.0 for interest rate processing
     for row in year_data:
@@ -192,7 +254,7 @@ def interest_data():
 @lru_cache(maxsize=None)
 def inflation_data():
     data = read_data(csv_path="data/inflation.csv")
-    year_data = extract_year_end_data(data, month=12)
+    year_data = extract_year_end_data_by_month(data, month=12)
     year_data = compute_annual_change_rate(year_data)
     # Convert value to float, divide by 100, and add 1.0 for interest rate processing
     for row in year_data:

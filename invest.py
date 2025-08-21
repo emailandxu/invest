@@ -88,7 +88,7 @@ def invest(year, max_year, new_savings, interest_rate, withdraw_rate, total=0, i
         "withdrawed_interest_rate": (interest - withdraw) / (init_total) if init_total!=0 else -1.0,
         'withdraw_total': withdraw_total,
         'withdraw': withdraw,
-        "interest_vs_principle": (interest_total - withdraw_total) / (total - (interest_total - withdraw_total) + 1e-16),
+        "withdrawed_interest_vs_principle": (interest_total - withdraw_total) / (total - (interest_total - withdraw_total) + 1e-16),
         'total': total
     }
     
@@ -130,7 +130,7 @@ def invest_gui():
         def create_controls(self, main_layout):
             # Control panel
             control_widget = QWidget()
-            control_widget.setFixedWidth(200)
+            control_widget.setFixedWidth(250)
             control_layout = QVBoxLayout(control_widget)
             
             # Parameter grid
@@ -232,25 +232,26 @@ def invest_gui():
             grid_layout.addWidget(self.new_savings_slider, row, 0)
             grid_layout.addWidget(self.new_savings_label, row, 1)
             row += 1
-            # Use SP500
-            grid_layout.addWidget(QLabel("Use S&P 500:"), row, 0)
-            self.use_sp500_checkbox = QCheckBox()
-            self.use_sp500_checkbox.stateChanged.connect(self.update_simulation)
-            row += 1
-            grid_layout.addWidget(self.use_sp500_checkbox, row, 0)
-            row += 1
-            grid_layout.addWidget(QLabel("Use Real Interest:"), row, 0)
-            self.use_real_interest_checkbox = QCheckBox(text="Use Real Interest")
+            
+
+            # Real Data checkboxes
+            real_data_widget = QWidget()
+            real_data_layout = QGridLayout(real_data_widget)
+                        
+            self.use_real_interest_checkbox = QCheckBox(text="int.")
             self.use_real_interest_checkbox.stateChanged.connect(self.update_simulation)
-            row += 1
-            grid_layout.addWidget(self.use_real_interest_checkbox, row, 0)
-            row += 1
-            grid_layout.addWidget(QLabel("Use Real CPI:"), row, 0)
-            self.use_real_cpi_checkbox = QCheckBox()
+            real_data_layout.addWidget(self.use_real_interest_checkbox, 0, 1)
+
+            self.use_real_cpi_checkbox = QCheckBox(text="cpi")
             self.use_real_cpi_checkbox.stateChanged.connect(self.update_simulation)
-            row += 1
-            grid_layout.addWidget(self.use_real_cpi_checkbox, row, 0)
-            row += 1
+            real_data_layout.addWidget(self.use_real_cpi_checkbox, 0, 2)
+            
+            self.use_sp500_checkbox = QCheckBox(text="sp500")
+            self.use_sp500_checkbox.stateChanged.connect(self.update_simulation)
+            real_data_layout.addWidget(self.use_sp500_checkbox, 0, 3)
+            
+            grid_layout.addWidget(real_data_widget, row, 0, 1, 2)
+
             control_layout.addWidget(grid_widget)
             
             # Reset button
@@ -271,7 +272,7 @@ def invest_gui():
             self.plot_withdrawed_interest_rate = pg.PlotWidget(title="Withdrawed Interest Rate")
             self.plot_interest = pg.PlotWidget(title="Interest Total")
             self.plot_withdraw = pg.PlotWidget(title="Withdrawals")
-            self.plot_ratio = pg.PlotWidget(title="Interest VS Principle")
+            self.plot_ratio = pg.PlotWidget(title="Withdrawed Interest VS Principle")
             
             # Configure plots
             self.plot_total.setLabel('left', 'Amount ($)')
@@ -433,7 +434,7 @@ def invest_gui():
                                       symbol='h', symbolSize=4, symbolBrush='brown')
                 
                 # Plot 6: Interest VS Principle
-                self.plot_ratio.plot(years, series('interest_vs_principle'), pen=pg.mkPen(color='red', width=2), 
+                self.plot_ratio.plot(years, series('withdrawed_interest_vs_principle'), pen=pg.mkPen(color='red', width=2), 
                                    symbol='d', symbolSize=4, symbolBrush='red')
                 
                 # Update results display
@@ -454,7 +455,11 @@ def invest_gui():
                 
                 # Financial Summary
                 results_text += "💰 FINANCIAL SUMMARY:\n"
+                final_withdraw_total = years_result[-1]['withdraw_total'] if years_result else 0
+                final_interest_total = years_result[-1]['interest_total'] if years_result else 0
                 results_text += f"  • Final Total:         ${final_total:>12,.2f}\n"
+                results_text += f"  • Final Withdraw Total: ${final_withdraw_total:>12,.2f}\n"
+                results_text += f"  • Final Interest Total: ${final_interest_total:>12,.2f}\n"
                 results_text += f"  • Initial Investment:  ${curr_start_total:>12,.2f}\n"
                 duration = (curr_end_year if zero_year is None else zero_year) - curr_start_year
                 if duration > 0 and curr_start_total > 0:
