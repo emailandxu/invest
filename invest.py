@@ -385,6 +385,21 @@ def invest_gui():
     # Initial simulation run
     update_simulation()
     
+
+        # Add keyboard event handling for arrow keys
+    def on_key_press(event):
+        if event.keysym == 'Left':
+            current_year = start_year_var.get()
+            start_year_var.set(current_year - 1)
+        elif event.keysym == 'Right':
+            current_year = start_year_var.get()
+            start_year_var.set(current_year + 1)
+    
+    # Bind keyboard events to the root window
+    root.bind('<Left>', on_key_press)
+    root.bind('<Right>', on_key_press)
+    root.focus_set()  # Ensure the window can receive keyboard events
+    
     # Start the main loop
     root.mainloop()
     
