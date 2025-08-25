@@ -48,8 +48,9 @@ def invest(year, max_year, new_savings, interest_rate, withdraw_rate, total=0, i
         "withdrawed_interest_rate": (interest - withdraw) / (init_total) if init_total!=0 else -1.0,
         'withdraw_total': withdraw_total,
         'withdraw': withdraw,
-        "withdrawed_interest_vs_principle": (interest_total - withdraw_total) / (total - (interest_total - withdraw_total) + 1e-16),
-        'total': total
+        "withdrawed_interest_vs_principle": (interest_total - withdraw_total) / (total + withdraw_total - interest_total + 1e-16),
+        'total': total,
+        "principle": total + withdraw_total - interest_total,
     }
     
     # Recursively get remaining years and prepend current year

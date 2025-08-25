@@ -73,20 +73,20 @@ class InvestmentParams:
         return get_value_by_year(interest_data(), year, default=self.interest_rate)
     
     @lru_cache(maxsize=None)
-    def get_real_inflation_rate_multiplier(self, year):
+    def get_real_inflation_rate_multiplier(self, year, start_year=None):
         return reduce(
             lambda x, y: x * y, 
             [(1.0 + get_value_by_year(inflation_data(), y, default=self.cpi)) 
-             for y in range(self.start_year, year)], 
+             for y in range(start_year if start_year is not None else self.start_year, year)], 
             1
         )
 
-    def get_inflation_rate_multiplier(self, year):
+    def get_inflation_rate_multiplier(self, year, start_year=None):
         """Get cumulative inflation rate multiplier for a given year."""
         if self.use_real_cpi:
-            return self.get_real_inflation_rate_multiplier(year)
+            return self.get_real_inflation_rate_multiplier(year, start_year)
         else:
-            return (1 + self.cpi) ** (year - self.start_year)
+            return (1 + self.cpi) ** (year - (start_year if start_year is not None else self.start_year))
 
     def get_new_savings(self, year):
         """Get new savings amount for a given year."""
@@ -166,7 +166,14 @@ class InvestmentYearsResult:
             'growth_rate': growth_rate,
             'inflation_rate': self.params.get_inflation_rate_multiplier(self.params.end_year),
             'living_cost': living_cost,
-            'living_cost_benchmark': living_cost_benchmark
+            'living_cost_benchmark': living_cost_benchmark,
+            'living_cost_gap_min': np.min(living_cost / (living_cost_benchmark + 1e-4)),
+            'living_cost_gap_mean': np.mean(living_cost / (living_cost_benchmark + 1e-4)),
+            'living_cost_gap_std': np.std(living_cost / (living_cost_benchmark + 1e-4)),
+            'total_min': np.min(self.series('total')),
+            'total_max': np.max(self.series('total')),
+            'total_mean': np.mean(self.series('total')),
+            'total_std': np.std(self.series('total')),
         }
     
     @property
@@ -190,13 +197,14 @@ class InvestmentYearsResult:
         metrics = self.financial_stats
         text = "💰 FINANCIAL SUMMARY:\n"
         text += f"  • Final:         {metrics['final_total']:>12,.2f}$\n"
+        text += f"  • Total Min: {metrics['total_min']:>12,.2f}$\n"
         text += f"  • Withdraw Total: {metrics['final_withdraw_total']:>12,.2f}$\n"
         text += f"  • Interest Total: {metrics['final_interest_total']:>12,.2f}$\n"
         text += f"  • CGAR:  {metrics['growth_rate']:>12.2%}\n"
         text += f"  • Inflation Rate: {metrics['inflation_rate']:>12.2%}\n"
-        text += f"  • Living Cost Gap (Min):  {np.min(metrics['living_cost'] / (metrics['living_cost_benchmark'] + 1e-4)):>8.2%}\n"
-        text += f"  • Living Cost Gap (Mean): {np.mean(metrics['living_cost'] / (metrics['living_cost_benchmark'] + 1e-4)):>8.2%}\n"
-        text += f"  • Living Cost Gap (Std):  {np.std(metrics['living_cost'] / (metrics['living_cost_benchmark'] + 1e-4)):>8.2%}\n"
+        text += f"  • Living Cost Gap (Min):  {metrics['living_cost_gap_min']:>8.2%}\n"
+        text += f"  • Living Cost Gap (Mean): {metrics['living_cost_gap_mean']:>8.2%}\n"
+        text += f"  • Living Cost Gap (Std):  {metrics['living_cost_gap_std']:>8.2%}\n"
         text += "\n"
         return text
     
@@ -554,8 +562,23 @@ class InvestmentPlotPanel(QWidget):
                             symbol='o', symbolSize=4, symbolBrush='blue')
         
         if self.show_benchmark:
-            # Add benchmark line for total plot (start total adjusted for inflation)
-            benchmark_total = [years_result.params.start_total * years_result.params.get_real_inflation_rate_multiplier(year) for year in years]
+            # Bias adjustment: corrects for inflation compounding on new savings contributions
+            # Each year's new savings experiences different inflation periods, so we subtract
+            # the excess inflation to get an accurate baseline for comparison
+            bias_benchmark_total = [
+                years_result.series('new_savings')[idx] * (
+                    years_result.params.get_real_inflation_rate_multiplier(
+                        year, start_year=years_result.params.start_year
+                    ) - 1
+                ) for idx, year in enumerate(years)
+            ]
+            bias_benchmark_total = np.cumsum(bias_benchmark_total)
+            benchmark_total = [
+                years_result.series('principle')[idx] * 
+                years_result.params.get_real_inflation_rate_multiplier(year) 
+                for idx, year in enumerate(years)
+            ]
+            benchmark_total = [benchmark_total[idx] - bias_benchmark_total[idx] for idx in range(len(years))]
             self.plot_total.plot(years, benchmark_total, 
                                 pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
                                 name='Inflation Adjusted Start Total')
@@ -567,7 +590,7 @@ class InvestmentPlotPanel(QWidget):
         
         if self.show_benchmark:
             # Add benchmark line for real interest rate
-            benchmark_real_interest = [years_result.params.real_interest_rate(year) for year in years]
+            benchmark_real_interest = [years_result.params.sp500_interest_rate(year) for year in years]
             self.plot_interest_rate.plot(years, benchmark_real_interest, 
                                         pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
                                         name='Real Interest Rate')
