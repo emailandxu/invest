@@ -1,4 +1,4 @@
-USD = lambda x: x * 7.2
+USD = lambda x: x #* 7.2 #/ 12
 
 def print_table(years_result):
     columns = list(years_result[0].keys())
