@@ -98,7 +98,9 @@ class InvestmentParams:
     def get_interest_rate(self, year):
         """Get interest rate for a given year based on parameters."""
         if self.use_sp500 and self.use_real_interest:
-            return self.sp500_interest_rate(year) * self.stock_weight + self.real_interest_rate(year) * (1 - self.stock_weight)
+            stock_rate = self.sp500_interest_rate(year)
+            interest_rate = self.real_interest_rate(year)
+            return stock_rate * self.stock_weight + interest_rate * (1 - self.stock_weight)
         elif self.use_sp500:
             return self.sp500_interest_rate(year)
         elif self.use_real_interest:
@@ -338,27 +340,6 @@ class InvestmentControlPanel(QWidget):
         grid_layout.addWidget(self.stock_weight_label, row, 1)
         row += 1
 
-        # Real Data checkboxes
-        real_data_widget = QWidget()
-        real_data_layout = QGridLayout(real_data_widget)
-                    
-        self.use_real_interest_checkbox = QCheckBox(text="int.")
-        self.use_real_interest_checkbox.stateChanged.connect(self._on_change)
-        real_data_layout.addWidget(self.use_real_interest_checkbox, 0, 1)
-
-        self.use_real_cpi_checkbox = QCheckBox(text="cpi")
-        self.use_real_cpi_checkbox.stateChanged.connect(self._on_change)
-        real_data_layout.addWidget(self.use_real_cpi_checkbox, 0, 2)
-        
-        self.use_sp500_checkbox = QCheckBox(text="sp500")
-        self.use_sp500_checkbox.stateChanged.connect(self._on_change)
-        real_data_layout.addWidget(self.use_sp500_checkbox, 0, 3)
-        grid_layout.addWidget(real_data_widget, row, 0, 1, 2)
-
-        self.adptive_withdraw_rate_checkbox = QCheckBox(text="ada.")
-        self.adptive_withdraw_rate_checkbox.stateChanged.connect(self._on_change)
-        real_data_layout.addWidget(self.adptive_withdraw_rate_checkbox, 0, 4)
-
         layout.addWidget(grid_widget)
 
         # Reset button
@@ -379,13 +360,29 @@ class InvestmentControlPanel(QWidget):
         
         layout.addWidget(conclusion_widget)
 
-        ui_control_widget = QWidget()
-        ui_control_layout = QHBoxLayout(ui_control_widget)
+        # Real Data checkboxes
+        real_data_widget = QWidget()
+        real_data_layout = QGridLayout(real_data_widget)
+        self.use_sp500_checkbox = QCheckBox(text="Standard & Poor's 500")
+        self.use_sp500_checkbox.stateChanged.connect(self._on_change)
+        real_data_layout.addWidget(self.use_sp500_checkbox, 0, 0)
+                    
+        self.use_real_interest_checkbox = QCheckBox(text="Federal Funds Rate")
+        self.use_real_interest_checkbox.stateChanged.connect(self._on_change)
+        real_data_layout.addWidget(self.use_real_interest_checkbox, 1, 0)
+        
+        self.use_real_cpi_checkbox = QCheckBox(text="Consumer Price Index")
+        self.use_real_cpi_checkbox.stateChanged.connect(self._on_change)
+        real_data_layout.addWidget(self.use_real_cpi_checkbox, 2, 0)
+        
+        self.adptive_withdraw_rate_checkbox = QCheckBox(text="Adaptive Withdraw")
+        self.adptive_withdraw_rate_checkbox.stateChanged.connect(self._on_change)
+        real_data_layout.addWidget(self.adptive_withdraw_rate_checkbox, 3, 0)
+        
         self.show_benchmark_checkbox = QCheckBox(text="Show Benchmark")
         self.show_benchmark_checkbox.stateChanged.connect(self._on_ui_control_change)
-        ui_control_layout.addWidget(self.show_benchmark_checkbox)
-        ui_control_layout.addStretch()
-        layout.addWidget(ui_control_widget)
+        real_data_layout.addWidget(self.show_benchmark_checkbox, 4, 0)
+        layout.addWidget(real_data_widget)
 
     def _on_change(self):
         """Internal callback that updates labels and triggers external callback."""
@@ -395,7 +392,7 @@ class InvestmentControlPanel(QWidget):
     
     def _on_ui_control_change(self):
         self.plot_panel.show_benchmark = self.show_benchmark_checkbox.isChecked()
-        self.plot_panel.update(None)
+        self.plot_panel.update()
 
     def update_labels(self):
         """Update all parameter labels with current slider values."""
@@ -448,7 +445,7 @@ class InvestmentControlPanel(QWidget):
         """Reset all controls to default values."""
         self.set_parameters(InvestmentParams.get_defaults())
 
-    def update(self, msg: str):
+    def update(self, msg: str=""):
         """Update the results text display with formatted analysis."""
         self.conclusion_text_widget.setPlainText(msg)
 
@@ -466,11 +463,11 @@ class InvestmentPlotPanel(QWidget):
         # Create list of plot widgets with titles
         plot_configs = [
             ("Total Amount Over Time", "Amount ($)", "Year"),
-            ("Interest Rate", "Rate", "Year"),
-            ("Withdrawed Interest Rate", "Rate", "Year"),
-            ("Interest Total", "Interest ($)", "Year"),
-            ("Withdrawals", "Withdraw ($)", "Year"),
-            ("Withdrawed Interest VS Principle", "Rate", "Year")
+            ("ROI", "Rate", "Year"),
+            ("ROI (Withdrawed)", "Rate", "Year"),
+            ("Return", "Return ($)", "Year"),
+            ("Withdraw", "Withdraw ($)", "Year"),
+            ("Accumulated ROI (Withdrawed)", "Rate", "Year")
         ]
         
         # Create plot widgets from configuration
@@ -581,8 +578,6 @@ class InvestmentPlotPanel(QWidget):
             self.plot_withdraw.plot(years, benchmark_withdrawals, 
                                 pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
                                 name='Target Cost')
-            # Set plot scale from 0 to max_withdraw
-            self.plot_withdraw.setYRange(0, benchmark_withdrawals[-1])
                 
         # Plot 6: Interest VS Principle
         self.plot_ratio.plot(years, years_result.series('withdrawed_interest_vs_principle'), 
