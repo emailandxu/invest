@@ -562,7 +562,7 @@ class InvestmentControlPanel(QWidget):
     def reset(self):
         """Reset all controls to default values."""
         self.set_parameters(InvestmentParams.get_defaults())
-        self.check_boxes.setChecked(True)
+        self.show_benchmark_checkbox.setChecked(True)
 
     def update(self, msg: str=""):
         """Update the results text display with formatted analysis."""
