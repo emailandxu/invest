@@ -135,7 +135,7 @@ class StrategyBasic(InvestmentParams):
             if target_living_cost_withdraw_rate > 0.04:
                 withdraw_rate0 = (target_living_cost_withdraw_rate - 0.04) * 0.25 + 0.04
                 withdraw_rate1 = target_living_cost_withdraw_rate * 0.66
-                return max(withdraw_rate0, withdraw_rate1)
+                return min(max(withdraw_rate0, withdraw_rate1), 1.0)
             else:
                 return target_living_cost_withdraw_rate
         else:
