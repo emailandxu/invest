@@ -149,13 +149,24 @@ class InvestmentYearsResult:
         else:
             growth_rate = 0.0
         
+        living_cost_benchmark = np.array([
+            self.params.get_real_inflation_rate_multiplier(
+                self.years_result[idx]['year']
+            ) * self.params.cost
+            for idx in range(len(self.years_result))
+        ])
+        
+        living_cost = np.array([self.years_result[idx]['withdraw'] for idx in range(len(self.years_result))])
+
         return {
             'final_total': final_total,
             'final_withdraw_total': final_withdraw_total,
             'final_interest_total': final_interest_total,
             'zero_year': zero_year,
             'growth_rate': growth_rate,
-            'inflation_rate': self.params.get_inflation_rate_multiplier(self.params.end_year)
+            'inflation_rate': self.params.get_inflation_rate_multiplier(self.params.end_year),
+            'living_cost': living_cost,
+            'living_cost_benchmark': living_cost_benchmark
         }
     
     @property
@@ -183,6 +194,9 @@ class InvestmentYearsResult:
         text += f"  • Interest Total: {metrics['final_interest_total']:>12,.2f}$\n"
         text += f"  • CGAR:  {metrics['growth_rate']:>12.2%}\n"
         text += f"  • Inflation Rate: {metrics['inflation_rate']:>12.2%}\n"
+        text += f"  • Living Cost Gap (Min):  {np.min(metrics['living_cost'] / (metrics['living_cost_benchmark'] + 1e-4)):>8.2%}\n"
+        text += f"  • Living Cost Gap (Mean): {np.mean(metrics['living_cost'] / (metrics['living_cost_benchmark'] + 1e-4)):>8.2%}\n"
+        text += f"  • Living Cost Gap (Std):  {np.std(metrics['living_cost'] / (metrics['living_cost_benchmark'] + 1e-4)):>8.2%}\n"
         text += "\n"
         return text
     
@@ -371,7 +385,7 @@ class InvestmentControlPanel(QWidget):
         self.use_real_interest_checkbox.stateChanged.connect(self._on_change)
         real_data_layout.addWidget(self.use_real_interest_checkbox, 1, 0)
         
-        self.use_real_cpi_checkbox = QCheckBox(text="Consumer Price Index")
+        self.use_real_cpi_checkbox = QCheckBox(text="American CPI")
         self.use_real_cpi_checkbox.stateChanged.connect(self._on_change)
         real_data_layout.addWidget(self.use_real_cpi_checkbox, 2, 0)
         
@@ -596,7 +610,7 @@ class InvestmentSimulator(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Investment Simulator")
-        self.setGeometry(100, 100, 1600, 800)
+        self.setGeometry(100, 100, 900, 600)
         
         # Initialize with default parameters
         self.params = InvestmentParams.get_defaults()
