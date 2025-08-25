@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt5.QtCore import Qt
 import pyqtgraph as pg
 import numpy as np
-from functools import reduce
+from functools import lru_cache, reduce
 from read_data import get_change_rate_by_year, get_value_by_year, sp500_data, interest_data, inflation_data
 from invest import invest
 from utils import USD
@@ -28,6 +28,26 @@ class InvestmentParams:
     use_real_interest: bool = False
     use_real_cpi: bool = False
     new_savings: float = USD(3.0)
+    stock_weight: float = 1.0
+    adptive_withdraw_rate: bool = False
+
+    def __hash__(self):
+        """Return hash of the investment parameters for caching purposes."""
+        return hash((
+            self.start_year,
+            self.duration,
+            self.retire_offset,
+            self.start_total,
+            self.cost,
+            self.cpi,
+            self.interest_rate,
+            self.use_sp500,
+            self.use_real_interest,
+            self.use_real_cpi,
+            self.new_savings,
+            self.stock_weight,
+            self.adptive_withdraw_rate
+        ))
     
     @property
     def end_year(self) -> int:
@@ -44,41 +64,63 @@ class InvestmentParams:
         """Create an instance with default values."""
         return cls()
     
-    def get_interest_rate(self, year):
+    def sp500_interest_rate(self, year):
         """Get interest rate for a given year based on parameters."""
-        if self.use_sp500:
-            return get_change_rate_by_year(sp500_data(), year, default=self.interest_rate)
-        elif self.use_real_interest:
-            return get_value_by_year(interest_data(), year, default=self.interest_rate)
-        else:
-            return self.interest_rate
+        return get_change_rate_by_year(sp500_data(), year, default=self.interest_rate)
+
+    def real_interest_rate(self, year):
+        """Get interest rate for a given year based on parameters."""
+        return get_value_by_year(interest_data(), year, default=self.interest_rate)
     
+    @lru_cache(maxsize=None)
+    def get_real_inflation_rate_multiplier(self, year):
+        return reduce(
+            lambda x, y: x * y, 
+            [(1.0 + get_value_by_year(inflation_data(), y, default=self.cpi)) 
+             for y in range(self.start_year, year)], 
+            1
+        )
+
     def get_inflation_rate_multiplier(self, year):
         """Get cumulative inflation rate multiplier for a given year."""
         if self.use_real_cpi:
-            return reduce(
-                lambda x, y: x * y, 
-                [(1.0 + get_value_by_year(inflation_data(), y, default=self.cpi)) 
-                 for y in range(self.start_year, year)], 
-                1
-            )
+            return self.get_real_inflation_rate_multiplier(year)
         else:
             return (1 + self.cpi) ** (year - self.start_year)
-    
+
     def get_new_savings(self, year):
         """Get new savings amount for a given year."""
         if year < self.retire_year:
             return self.new_savings * self.get_inflation_rate_multiplier(year)
         else:
             return 0
+
+    def get_interest_rate(self, year):
+        """Get interest rate for a given year based on parameters."""
+        if self.use_sp500 and self.use_real_interest:
+            return self.sp500_interest_rate(year) * self.stock_weight + self.real_interest_rate(year) * (1 - self.stock_weight)
+        elif self.use_sp500:
+            return self.sp500_interest_rate(year)
+        elif self.use_real_interest:
+            return self.real_interest_rate(year)
+        else:
+            return self.interest_rate
     
     def get_withdraw_rate(self, year, total):
         """Get withdrawal rate for a given year and total."""
-        return (self.cost / (total + 1e-16)) * self.get_inflation_rate_multiplier(year)
+        target_living_cost_withdraw_rate = (self.cost / (total + 1e-16)) * self.get_inflation_rate_multiplier(year)
+
+        if self.adptive_withdraw_rate:
+            if target_living_cost_withdraw_rate > 0.04:
+                return 0.04
+            else:
+                return target_living_cost_withdraw_rate
+        else:
+            return target_living_cost_withdraw_rate
 
 class InvestmentYearsResult:
     def __init__(self, params, years_result):
-        self.params = params
+        self.params: InvestmentParams = params
         self.years_result = years_result
     
     @property
@@ -194,8 +236,9 @@ class InvestmentYearsResult:
 class InvestmentControlPanel(QWidget):
     """Control panel widget containing all parameter sliders and checkboxes."""
     
-    def __init__(self, on_parameter_change=None):
+    def __init__(self, plot_panel, on_parameter_change=None):
         super().__init__()
+        self.plot_panel = plot_panel
         self.on_parameter_change = on_parameter_change
         self.setup_ui()
     
@@ -285,6 +328,16 @@ class InvestmentControlPanel(QWidget):
         grid_layout.addWidget(self.new_savings_label, row, 1)
         row += 1
         
+        # Stock Weight
+        self.stock_weight_slider = QSlider(Qt.Horizontal)
+        self.stock_weight_slider.setRange(0, 100)
+        self.stock_weight_slider.valueChanged.connect(self._on_change)
+        self.stock_weight_label = QLabel()
+        row += 1
+        grid_layout.addWidget(self.stock_weight_slider, row, 0)
+        grid_layout.addWidget(self.stock_weight_label, row, 1)
+        row += 1
+
         # Real Data checkboxes
         real_data_widget = QWidget()
         real_data_layout = QGridLayout(real_data_widget)
@@ -301,6 +354,10 @@ class InvestmentControlPanel(QWidget):
         self.use_sp500_checkbox.stateChanged.connect(self._on_change)
         real_data_layout.addWidget(self.use_sp500_checkbox, 0, 3)
         grid_layout.addWidget(real_data_widget, row, 0, 1, 2)
+
+        self.adptive_withdraw_rate_checkbox = QCheckBox(text="ada.")
+        self.adptive_withdraw_rate_checkbox.stateChanged.connect(self._on_change)
+        real_data_layout.addWidget(self.adptive_withdraw_rate_checkbox, 0, 4)
 
         layout.addWidget(grid_widget)
 
@@ -322,11 +379,23 @@ class InvestmentControlPanel(QWidget):
         
         layout.addWidget(conclusion_widget)
 
+        ui_control_widget = QWidget()
+        ui_control_layout = QHBoxLayout(ui_control_widget)
+        self.show_benchmark_checkbox = QCheckBox(text="Show Benchmark")
+        self.show_benchmark_checkbox.stateChanged.connect(self._on_ui_control_change)
+        ui_control_layout.addWidget(self.show_benchmark_checkbox)
+        ui_control_layout.addStretch()
+        layout.addWidget(ui_control_widget)
+
     def _on_change(self):
         """Internal callback that updates labels and triggers external callback."""
         self.update_labels()
         if self.on_parameter_change:
             self.on_parameter_change()
+    
+    def _on_ui_control_change(self):
+        self.plot_panel.show_benchmark = self.show_benchmark_checkbox.isChecked()
+        self.plot_panel.update(None)
 
     def update_labels(self):
         """Update all parameter labels with current slider values."""
@@ -338,6 +407,7 @@ class InvestmentControlPanel(QWidget):
         self.cpi_label.setText(f"CPI: {self.cpi_slider.value() / 10000:.3f}")
         self.interest_rate_label.setText(f"Int.: {self.interest_rate_slider.value() / 10000:.3f}")
         self.new_savings_label.setText(f"Gain: {self.new_savings_slider.value() / 100:.2f}")
+        self.stock_weight_label.setText(f"StockWeight: {self.stock_weight_slider.value() / 100:.2f}")
 
     def set_parameters(self, params: InvestmentParams):
         """Set all sliders and checkboxes from parameter object."""
@@ -352,6 +422,8 @@ class InvestmentControlPanel(QWidget):
         self.use_sp500_checkbox.setChecked(params.use_sp500)
         self.use_real_interest_checkbox.setChecked(params.use_real_interest)
         self.use_real_cpi_checkbox.setChecked(params.use_real_cpi)
+        self.stock_weight_slider.setValue(int(params.stock_weight * 100))
+        self.adptive_withdraw_rate_checkbox.setChecked(params.adptive_withdraw_rate)
         self._on_change()
 
     def get_parameters(self) -> InvestmentParams:
@@ -368,6 +440,8 @@ class InvestmentControlPanel(QWidget):
         params.use_real_interest = self.use_real_interest_checkbox.isChecked()
         params.use_real_cpi = self.use_real_cpi_checkbox.isChecked()
         params.new_savings = self.new_savings_slider.value() / 100  # Scale down from cents to dollars
+        params.stock_weight = self.stock_weight_slider.value() / 100  # Scale down from cents to dollars
+        params.adptive_withdraw_rate = self.adptive_withdraw_rate_checkbox.isChecked()
         return params
 
     def reset(self):
@@ -381,10 +455,11 @@ class InvestmentControlPanel(QWidget):
 class InvestmentPlotPanel(QWidget):
     """Plot panel widget containing all investment simulation plots."""
     
-    def __init__(self):
+    def __init__(self, show_benchmark=False):
         super().__init__()
         self.setup_ui()
-    
+        self.show_benchmark = show_benchmark
+
     def setup_ui(self):
         layout = QGridLayout(self)
         
@@ -411,7 +486,7 @@ class InvestmentPlotPanel(QWidget):
         self.plot_total = self.plots[0]
         self.plot_interest_rate = self.plots[1]
         self.plot_withdrawed_interest_rate = self.plots[2]
-        self.plot_interest = self.plots[3]
+        self.plot_interest_total = self.plots[3]
         self.plot_withdraw = self.plots[4]
         self.plot_ratio = self.plots[5]
 
@@ -420,16 +495,16 @@ class InvestmentPlotPanel(QWidget):
     def setup_layout(self, layout):
         self.plots.clear()
         self.plots.append(self.plot_total)
-        # self.plots.append(self.plot_interest_rate)
+        self.plots.append(self.plot_interest_rate)
         # self.plots.append(self.plot_withdrawed_interest_rate)
-        # self.plots.append(self.plot_interest)
-        # self.plots.append(self.plot_withdraw)
-        # self.plots.append(self.plot_ratio)
+        # self.plots.append(self.plot_interest_total)
+        self.plots.append(self.plot_withdraw)
+        self.plots.append(self.plot_ratio)
         
         # Automatically arrange plots in grid based on list length
         num_plots = len(self.plots)
         # Calculate optimal grid dimensions (prefer wider layouts)
-        cols = int(num_plots ** 0.5) + 1
+        cols = int(num_plots ** 0.5)
         if cols > 3:
             cols = 3  # Limit to maximum 3 columns for readability
         rows = (num_plots + cols - 1) // cols  # Ceiling division
@@ -445,12 +520,19 @@ class InvestmentPlotPanel(QWidget):
         self.plot_total.clear()
         self.plot_interest_rate.clear()
         self.plot_withdrawed_interest_rate.clear()
-        self.plot_interest.clear()
+        self.plot_interest_total.clear()
         self.plot_withdraw.clear()
         self.plot_ratio.clear()
     
-    def update(self, years_result: InvestmentYearsResult):
+    def update(self, years_result: InvestmentYearsResult=None):
         """Update all plots with simulation results."""
+        if years_result is not None:
+            self.years_result = years_result
+        elif self.years_result is not None:
+            years_result = self.years_result
+        else:
+            raise ValueError("years_result is required")
+
         self.clear_all_plots()
         
         # Helper function to extract series data
@@ -460,10 +542,24 @@ class InvestmentPlotPanel(QWidget):
         self.plot_total.plot(years, years_result.series('total'), pen=pg.mkPen(color='blue', width=2), 
                             symbol='o', symbolSize=4, symbolBrush='blue')
         
+        if self.show_benchmark:
+            # Add benchmark line for total plot (start total adjusted for inflation)
+            benchmark_total = [years_result.params.start_total * years_result.params.get_real_inflation_rate_multiplier(year) for year in years]
+            self.plot_total.plot(years, benchmark_total, 
+                                pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
+                                name='Inflation Adjusted Start Total')
+        
         # Plot 2: Interest Rate
         self.plot_interest_rate.plot(years, years_result.series('interest_rate', lambda v: round(v, 4)), 
                                     pen=pg.mkPen(color='green', width=2), 
                                     symbol='s', symbolSize=4, symbolBrush='green')
+        
+        if self.show_benchmark:
+            # Add benchmark line for real interest rate
+            benchmark_real_interest = [years_result.params.real_interest_rate(year) for year in years]
+            self.plot_interest_rate.plot(years, benchmark_real_interest, 
+                                        pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
+                                        name='Real Interest Rate')
         
         # Plot 3: Withdraw Rate
         self.plot_withdrawed_interest_rate.plot(years, years_result.series('withdrawed_interest_rate', lambda v: round(v, 4)), 
@@ -471,7 +567,7 @@ class InvestmentPlotPanel(QWidget):
                                               symbol='x', symbolSize=4, symbolBrush='orange')
         
         # Plot 4: Annual Interest
-        self.plot_interest.plot(years, years_result.series('interest_total'), pen=pg.mkPen(color='purple', width=2), 
+        self.plot_interest_total.plot(years, years_result.series('interest_total'), pen=pg.mkPen(color='purple', width=2), 
                                symbol='t', symbolSize=4, symbolBrush='purple')
         
         # Plot 5: Annual Withdrawals
@@ -479,10 +575,26 @@ class InvestmentPlotPanel(QWidget):
                                pen=pg.mkPen(color='brown', width=2), 
                                symbol='h', symbolSize=4, symbolBrush='brown')
         
+        if self.show_benchmark:
+            # Add benchmark line for withdrawal plot
+            benchmark_withdrawals = [years_result.params.cost * years_result.params.get_real_inflation_rate_multiplier(year) for year in years]
+            self.plot_withdraw.plot(years, benchmark_withdrawals, 
+                                pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
+                                name='Target Cost')
+            # Set plot scale from 0 to max_withdraw
+            self.plot_withdraw.setYRange(0, benchmark_withdrawals[-1])
+                
         # Plot 6: Interest VS Principle
         self.plot_ratio.plot(years, years_result.series('withdrawed_interest_vs_principle'), 
                             pen=pg.mkPen(color='red', width=2), 
                             symbol='d', symbolSize=4, symbolBrush='red')
+
+        if self.show_benchmark:
+            # Add benchmark line for interest vs principle plot
+            benchmark_ratio = [years_result.params.get_real_inflation_rate_multiplier(year) - 1.0 for year in years]  # Line at 1.0 representing break-even
+            self.plot_ratio.plot(years, benchmark_ratio, 
+                                pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
+                                name='Break-even')
 
 class InvestmentSimulator(QMainWindow):
     
@@ -500,8 +612,8 @@ class InvestmentSimulator(QMainWindow):
         main_layout = QHBoxLayout(main_widget)
         
         # Create control and plot panels
-        self.control_panel = InvestmentControlPanel(on_parameter_change=self.update)
         self.plot_panel = InvestmentPlotPanel()
+        self.control_panel = InvestmentControlPanel(self.plot_panel, on_parameter_change=self.update)
         
         main_layout.addWidget(self.control_panel)
         main_layout.addWidget(self.plot_panel)
