@@ -6,13 +6,13 @@ def invest(year, max_year, new_savings, interest_rate, withdraw_rate, total=0, i
     
     # Calculate current year's principles (can be function or constant)
     if callable(new_savings):
-        current_new_savings = new_savings(year)
+        current_new_savings = new_savings(year, total)
     else:
         current_new_savings = new_savings
     
     # Calculate current year's interest rate (can be function or constant)
     if callable(interest_rate):
-        current_interest_rate = interest_rate(year)
+        current_interest_rate = interest_rate(year, total)
     else:
         current_interest_rate = interest_rate
     
@@ -48,6 +48,7 @@ def invest(year, max_year, new_savings, interest_rate, withdraw_rate, total=0, i
         "withdrawed_interest_rate": (interest - withdraw) / (init_total) if init_total!=0 else -1.0,
         'withdraw_total': withdraw_total,
         'withdraw': withdraw,
+        'withdraw_rate': current_withdraw_rate,
         "withdrawed_interest_vs_principle": (interest_total - withdraw_total) / (total + withdraw_total - interest_total + 1e-16),
         'total': total,
         "principle": total + withdraw_total - interest_total,

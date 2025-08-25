@@ -17,19 +17,19 @@ from dataclasses import dataclass
 @dataclass
 class InvestmentParams:
     """Data class representing investment simulation parameters."""
-    start_year: int = 1995
+    start_year: int = 2000
     duration: int = 25
     retire_offset: int = 0
     start_total: float = USD(30)
     cost: float = USD(1.2)
     cpi: float = 0.00
     interest_rate: float = 0.00
-    use_sp500: bool = False
-    use_real_interest: bool = False
-    use_real_cpi: bool = False
     new_savings: float = USD(3.0)
     stock_weight: float = 1.0
-    adptive_withdraw_rate: bool = False
+    use_sp500: bool = True
+    use_real_interest: bool = True
+    use_real_cpi: bool = True
+    adptive_withdraw_rate: bool = True
 
     def __hash__(self):
         """Return hash of the investment parameters for caching purposes."""
@@ -88,14 +88,33 @@ class InvestmentParams:
         else:
             return (1 + self.cpi) ** (year - (start_year if start_year is not None else self.start_year))
 
-    def get_new_savings(self, year):
+class StrategyBasic(InvestmentParams):
+    @classmethod
+    def from_params(cls, params: InvestmentParams):
+        strategy = cls()
+        strategy.start_year = params.start_year
+        strategy.duration = params.duration
+        strategy.retire_offset = params.retire_offset
+        strategy.start_total = params.start_total
+        strategy.cost = params.cost
+        strategy.cpi = params.cpi
+        strategy.interest_rate = params.interest_rate
+        strategy.use_sp500 = params.use_sp500
+        strategy.use_real_interest = params.use_real_interest
+        strategy.use_real_cpi = params.use_real_cpi
+        strategy.new_savings = params.new_savings
+        strategy.stock_weight = params.stock_weight
+        strategy.adptive_withdraw_rate = params.adptive_withdraw_rate
+        return strategy
+
+    def get_new_savings(self, year, total):
         """Get new savings amount for a given year."""
         if year < self.retire_year:
-            return self.new_savings * self.get_inflation_rate_multiplier(year)
+            return self.new_savings * self.get_inflation_rate_multiplier(year, self.start_year)
         else:
             return 0
 
-    def get_interest_rate(self, year):
+    def get_interest_rate(self, year, total):
         """Get interest rate for a given year based on parameters."""
         if self.use_sp500 and self.use_real_interest:
             stock_rate = self.sp500_interest_rate(year)
@@ -114,12 +133,89 @@ class InvestmentParams:
 
         if self.adptive_withdraw_rate:
             if target_living_cost_withdraw_rate > 0.04:
-                return 0.04
+                withdraw_rate0 = (target_living_cost_withdraw_rate - 0.04) * 0.25 + 0.04
+                withdraw_rate1 = target_living_cost_withdraw_rate * 0.66
+                return max(withdraw_rate0, withdraw_rate1)
             else:
                 return target_living_cost_withdraw_rate
         else:
             return target_living_cost_withdraw_rate
 
+class StrategyBondsPriorSell(StrategyBasic):
+    @classmethod
+    def from_params(cls, params: InvestmentParams):
+        strategy = super().from_params(params)
+        strategy.stock_total_of_year = {
+            params.start_year - 1: params.start_total * params.stock_weight
+        }
+        strategy.bonds_total_of_year = {
+            params.start_year - 1: params.start_total * (1 - params.stock_weight)
+        }
+        return strategy
+    
+    def get_stock_weight(self, year):
+        try:
+            return self.stock_total_of_year[year] / (self.stock_total_of_year[year] + self.bonds_total_of_year[year] + 1e-16)
+        except KeyError:
+            return self.stock_weight
+    
+    def get_interest_rate(self, year, total):
+        """Get interest rate for a given year based on parameters."""
+        if self.use_sp500 and self.use_real_interest:
+            stock_rate = self.sp500_interest_rate(year) 
+            interest_rate = self.real_interest_rate(year)
+
+            stock_weight = self.get_stock_weight(year-1)
+            self.stock_total_of_year[year] = (stock_rate+1) * total * stock_weight
+            self.bonds_total_of_year[year] = (interest_rate+1) * total * (1 - stock_weight)
+            
+            return stock_rate * stock_weight + interest_rate * (1 - stock_weight)
+        
+        elif self.use_sp500:
+            self.stock_total_of_year[year] = (self.sp500_interest_rate(year)+1) * total * self.get_stock_weight(year-1) 
+            self.bonds_total_of_year[year] = 0
+            return self.sp500_interest_rate(year)
+        elif self.use_real_interest:
+            self.stock_total_of_year[year] = 0
+            self.bonds_total_of_year[year] = (self.real_interest_rate(year)+1) * total
+            return self.real_interest_rate(year)
+        else:
+            self.stock_total_of_year[year] = 0
+            self.bonds_total_of_year[year] = (self.interest_rate+1) * total
+            return self.interest_rate
+    
+    def get_withdraw_rate(self, year, total):
+        """Get withdrawal rate for a given year and total."""
+        def _get_withdraw_rate():
+            target_living_cost_withdraw_rate = (self.cost / (total + 1e-16)) * self.get_inflation_rate_multiplier(year)
+
+            if self.adptive_withdraw_rate:
+                if target_living_cost_withdraw_rate > 0.04:
+                    return 0.04
+                else:
+                    return target_living_cost_withdraw_rate
+            else:
+                return target_living_cost_withdraw_rate
+            
+        withdraw_rate = _get_withdraw_rate()
+        withdraw = total * withdraw_rate
+
+        if  self.get_stock_weight(year) < self.stock_weight:
+            self.bonds_total_of_year[year] -= withdraw
+        else:
+            self.stock_total_of_year[year] -= withdraw
+
+        if stock_weight := self.get_stock_weight(year) > (self.stock_weight - 0.01) :
+            bias = self.stock_total_of_year[year] * (stock_weight - (self.stock_weight - 0.01))
+            self.stock_total_of_year[year] -= bias
+            self.bonds_total_of_year[year] += bias
+
+
+        print(f"Year {year}: Stock weight {self.get_stock_weight(year-1):.3f} -> {self.get_stock_weight(year):.3f} (Δ{self.get_stock_weight(year) - self.get_stock_weight(year-1):+.3f}) | Stock: ${self.stock_total_of_year[year]:.0f} | Bonds: ${self.bonds_total_of_year[year]:.0f} | Withdraw: ${withdraw:.0f}")
+
+        return withdraw_rate
+
+    
 class InvestmentYearsResult:
     def __init__(self, params, years_result):
         self.params: InvestmentParams = params
@@ -281,7 +377,7 @@ class InvestmentControlPanel(QWidget):
         
         # Start Year
         self.start_year_slider = QSlider(Qt.Horizontal)
-        self.start_year_slider.setRange(1970, 2100)
+        self.start_year_slider.setRange(1954, 2100)
         self.start_year_slider.valueChanged.connect(self._on_change)
         self.start_year_label = QLabel()
         row += 1
@@ -466,6 +562,7 @@ class InvestmentControlPanel(QWidget):
     def reset(self):
         """Reset all controls to default values."""
         self.set_parameters(InvestmentParams.get_defaults())
+        self.check_boxes.setChecked(True)
 
     def update(self, msg: str=""):
         """Update the results text display with formatted analysis."""
@@ -486,10 +583,10 @@ class InvestmentPlotPanel(QWidget):
         plot_configs = [
             ("Total Amount Over Time", "Amount ($)", "Year"),
             ("ROI", "Rate", "Year"),
-            ("ROI (Withdrawed)", "Rate", "Year"),
+            ("Withdraw Rate", "Rate", "Year"),
             ("Return", "Return ($)", "Year"),
-            ("Withdraw", "Withdraw ($)", "Year"),
-            ("Accumulated ROI (Withdrawed)", "Rate", "Year")
+            ("Withdrawals", "Withdraw ($)", "Year"),
+            ("Accumulated ROI (Withdraw)", "Rate", "Year")
         ]
         
         # Create plot widgets from configuration
@@ -504,7 +601,7 @@ class InvestmentPlotPanel(QWidget):
         # Set individual plot references for backward compatibility
         self.plot_total = self.plots[0]
         self.plot_interest_rate = self.plots[1]
-        self.plot_withdrawed_interest_rate = self.plots[2]
+        self.plot_withdraw_rate = self.plots[2]
         self.plot_interest_total = self.plots[3]
         self.plot_withdraw = self.plots[4]
         self.plot_ratio = self.plots[5]
@@ -515,8 +612,8 @@ class InvestmentPlotPanel(QWidget):
         self.plots.clear()
         self.plots.append(self.plot_total)
         self.plots.append(self.plot_interest_rate)
-        # self.plots.append(self.plot_withdrawed_interest_rate)
-        # self.plots.append(self.plot_interest_total)
+        self.plots.append(self.plot_withdraw_rate)
+        self.plots.append(self.plot_interest_total)
         self.plots.append(self.plot_withdraw)
         self.plots.append(self.plot_ratio)
         
@@ -538,7 +635,7 @@ class InvestmentPlotPanel(QWidget):
         """Clear all plot widgets."""
         self.plot_total.clear()
         self.plot_interest_rate.clear()
-        self.plot_withdrawed_interest_rate.clear()
+        self.plot_withdraw_rate.clear()
         self.plot_interest_total.clear()
         self.plot_withdraw.clear()
         self.plot_ratio.clear()
@@ -596,7 +693,7 @@ class InvestmentPlotPanel(QWidget):
                                         name='Real Interest Rate')
         
         # Plot 3: Withdraw Rate
-        self.plot_withdrawed_interest_rate.plot(years, years_result.series('withdrawed_interest_rate', lambda v: round(v, 4)), 
+        self.plot_withdraw_rate.plot(years, years_result.series('withdraw_rate', lambda v: round(v, 4)), 
                                               pen=pg.mkPen(color='orange', width=2), 
                                               symbol='x', symbolSize=4, symbolBrush='orange')
         
@@ -672,13 +769,13 @@ class InvestmentSimulator(QMainWindow):
         
     def run_simulation(self, params: InvestmentParams):
         """Run the investment simulation with current parameters."""
-        
+        strategy = StrategyBasic.from_params(params)
         return InvestmentYearsResult(params, invest(
             year=params.start_year,
             max_year=params.end_year,
-            new_savings=params.get_new_savings,
-            interest_rate=params.get_interest_rate,
-            withdraw_rate=params.get_withdraw_rate,
+            new_savings=strategy.get_new_savings,
+            interest_rate=strategy.get_interest_rate,
+            withdraw_rate=strategy.get_withdraw_rate,
             total=params.start_total,
         ))
     
