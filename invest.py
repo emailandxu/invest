@@ -23,12 +23,12 @@ def invest(year, max_year, new_savings, interest_rate, withdraw_rate, total=0, i
 
     # Calculate current year's withdraw rate (can be function or constant)
     if callable(withdraw_rate):
-        current_withdraw_rate = withdraw_rate(year, init_total)
+        current_withdraw_rate = withdraw_rate(year, total)
     else:
         current_withdraw_rate = withdraw_rate
     
     # Calculate withdrawals and interest for current year
-    withdraw = init_total * current_withdraw_rate
+    withdraw = total * current_withdraw_rate
 
     if total - withdraw > 0:
         total -= withdraw
@@ -50,6 +50,7 @@ def invest(year, max_year, new_savings, interest_rate, withdraw_rate, total=0, i
         'withdraw': withdraw,
         'withdraw_rate': current_withdraw_rate,
         "withdrawed_interest_vs_principle": (interest_total - withdraw_total) / (total + withdraw_total - interest_total + 1e-16),
+        "interest_vs_principle": interest_total / (total + withdraw_total - interest_total + 1e-16),
         'total': total,
         "principle": total + withdraw_total - interest_total,
     }
@@ -60,4 +61,7 @@ def invest(year, max_year, new_savings, interest_rate, withdraw_rate, total=0, i
 
 if __name__ == "__main__":
     from utils import print_table, USD
-    print_table(invest(1995, 1995 + 25, 3, 0.02, 0.04))
+    print_table(invest(year=1995, max_year=1995 + 25, new_savings=3, 
+                      interest_rate=0.04, 
+                      withdraw_rate=lambda year, total: ((0.04 * 30) / total) * (1 + 0.02) ** (year - 1995)))
+    

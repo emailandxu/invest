@@ -6,7 +6,7 @@ from PyQt5.QtCore import Qt
 import pyqtgraph as pg
 import numpy as np
 from functools import lru_cache, reduce
-from read_data import get_change_rate_by_year, get_value_by_year, sp500_data, interest_data, inflation_data
+from read_data import get_change_rate_by_year, get_value_by_year, sp500_data, interest_data, inflation_data, inflation_rate_multiplier
 from invest import invest
 from utils import USD
 
@@ -21,7 +21,7 @@ class InvestmentParams:
     duration: int = 25
     retire_offset: int = 0
     start_total: float = USD(30)
-    cost: float = USD(1.2)
+    cost: float = USD(0.7)
     cpi: float = 0.00
     interest_rate: float = 0.00
     new_savings: float = USD(3.0)
@@ -72,21 +72,15 @@ class InvestmentParams:
         """Get interest rate for a given year based on parameters."""
         return get_value_by_year(interest_data(), year, default=self.interest_rate)
     
-    @lru_cache(maxsize=None)
-    def get_real_inflation_rate_multiplier(self, year, start_year=None):
-        return reduce(
-            lambda x, y: x * y, 
-            [(1.0 + get_value_by_year(inflation_data(), y, default=self.cpi)) 
-             for y in range(start_year if start_year is not None else self.start_year, year)], 
-            1
-        )
-
-    def get_inflation_rate_multiplier(self, year, start_year=None):
+    def get_real_inflation_rate_multiplier(self, year):
+        return inflation_rate_multiplier(year, self.start_year, default=self.cpi)
+    
+    def get_inflation_rate_multiplier(self, year):
         """Get cumulative inflation rate multiplier for a given year."""
         if self.use_real_cpi:
-            return self.get_real_inflation_rate_multiplier(year, start_year)
+            return self.get_real_inflation_rate_multiplier(year)
         else:
-            return (1 + self.cpi) ** (year - (start_year if start_year is not None else self.start_year))
+            return (1 + self.cpi) ** (year - self.start_year)
 
 class StrategyBasic(InvestmentParams):
     @classmethod
@@ -110,7 +104,7 @@ class StrategyBasic(InvestmentParams):
     def get_new_savings(self, year, total):
         """Get new savings amount for a given year."""
         if year < self.retire_year:
-            return self.new_savings * self.get_inflation_rate_multiplier(year, self.start_year)
+            return self.new_savings #* self.get_inflation_rate_multiplier(year)
         else:
             return 0
 
@@ -129,15 +123,19 @@ class StrategyBasic(InvestmentParams):
     
     def get_withdraw_rate(self, year, total):
         """Get withdrawal rate for a given year and total."""
-        target_living_cost_withdraw_rate = (self.cost / (total + 1e-16)) * self.get_inflation_rate_multiplier(year)
+        target_living_cost_withdraw_rate = ((self.cost+1e-16) / (total + 1e-16)) * self.get_inflation_rate_multiplier(year)
 
         if self.adptive_withdraw_rate:
-            if target_living_cost_withdraw_rate > 0.04:
-                withdraw_rate0 = (target_living_cost_withdraw_rate - 0.04) * 0.25 + 0.04
-                withdraw_rate1 = target_living_cost_withdraw_rate * 0.66
-                return min(max(withdraw_rate0, withdraw_rate1), 1.0)
+            central_ratio = 0.028
+            extra_ratio = (target_living_cost_withdraw_rate / central_ratio)
+            if extra_ratio >= 1:
+                extra_part = np.log(extra_ratio) / extra_ratio * central_ratio
+                return central_ratio + extra_part
             else:
-                return target_living_cost_withdraw_rate
+                extra_part = 1 / extra_ratio
+                extra_part = np.log(extra_part) / extra_part * central_ratio
+
+                return target_living_cost_withdraw_rate + extra_part
         else:
             return target_living_cost_withdraw_rate
 
@@ -186,18 +184,7 @@ class StrategyBondsPriorSell(StrategyBasic):
     
     def get_withdraw_rate(self, year, total):
         """Get withdrawal rate for a given year and total."""
-        def _get_withdraw_rate():
-            target_living_cost_withdraw_rate = (self.cost / (total + 1e-16)) * self.get_inflation_rate_multiplier(year)
-
-            if self.adptive_withdraw_rate:
-                if target_living_cost_withdraw_rate > 0.04:
-                    return 0.04
-                else:
-                    return target_living_cost_withdraw_rate
-            else:
-                return target_living_cost_withdraw_rate
-            
-        withdraw_rate = _get_withdraw_rate()
+        withdraw_rate = super().get_withdraw_rate(year, total)
         withdraw = total * withdraw_rate
 
         if  self.get_stock_weight(year) < self.stock_weight:
@@ -211,7 +198,7 @@ class StrategyBondsPriorSell(StrategyBasic):
             self.bonds_total_of_year[year] += bias
 
 
-        print(f"Year {year}: Stock weight {self.get_stock_weight(year-1):.3f} -> {self.get_stock_weight(year):.3f} (Δ{self.get_stock_weight(year) - self.get_stock_weight(year-1):+.3f}) | Stock: ${self.stock_total_of_year[year]:.0f} | Bonds: ${self.bonds_total_of_year[year]:.0f} | Withdraw: ${withdraw:.0f}")
+        # print(f"Year {year}: Stock weight {self.get_stock_weight(year-1):.3f} -> {self.get_stock_weight(year):.3f} (Δ{self.get_stock_weight(year) - self.get_stock_weight(year-1):+.3f}) | Stock: ${self.stock_total_of_year[year]:.0f} | Bonds: ${self.bonds_total_of_year[year]:.0f} | Withdraw: ${withdraw:.0f}")
 
         return withdraw_rate
 
@@ -240,10 +227,12 @@ class InvestmentYearsResult:
         
         # Calculate growth rate
         duration = (self.params.end_year if zero_year is None else zero_year) - self.params.start_year
-        if duration > 0 and self.params.start_total > 0:
-            growth_rate = (((final_total + 1e-4) / self.params.start_total) ** (1 / duration) - 1)
+        principle = self.years_result[-1]['principle']
+        if duration > 0 and principle > 0:
+            growth_rate = (((final_total + 1e-4) / principle) ** (1 / duration) - 1)
         else:
             growth_rate = 0.0
+
         
         living_cost_benchmark = np.array([
             self.params.get_real_inflation_rate_multiplier(
@@ -263,9 +252,9 @@ class InvestmentYearsResult:
             'inflation_rate': self.params.get_inflation_rate_multiplier(self.params.end_year),
             'living_cost': living_cost,
             'living_cost_benchmark': living_cost_benchmark,
-            'living_cost_gap_min': np.min(living_cost / (living_cost_benchmark + 1e-4)),
-            'living_cost_gap_mean': np.mean(living_cost / (living_cost_benchmark + 1e-4)),
-            'living_cost_gap_std': np.std(living_cost / (living_cost_benchmark + 1e-4)),
+            'living_cost_gap_min': np.min(living_cost / (living_cost_benchmark + 1e-4)) * self.params.cost / 12,
+            'living_cost_gap_mean': np.mean(living_cost / (living_cost_benchmark + 1e-4)) * self.params.cost / 12,
+            'living_cost_gap_std': np.std(living_cost / (living_cost_benchmark + 1e-4)) * self.params.cost / 12,
             'total_min': np.min(self.series('total')),
             'total_max': np.max(self.series('total')),
             'total_mean': np.mean(self.series('total')),
@@ -298,9 +287,9 @@ class InvestmentYearsResult:
         text += f"  • Interest Total: {metrics['final_interest_total']:>12,.2f}$\n"
         text += f"  • CGAR:  {metrics['growth_rate']:>12.2%}\n"
         text += f"  • Inflation Rate: {metrics['inflation_rate']:>12.2%}\n"
-        text += f"  • Living Cost Gap (Min):  {metrics['living_cost_gap_min']:>8.2%}\n"
-        text += f"  • Living Cost Gap (Mean): {metrics['living_cost_gap_mean']:>8.2%}\n"
-        text += f"  • Living Cost Gap (Std):  {metrics['living_cost_gap_std']:>8.2%}\n"
+        text += f"  • Living Cost Gap (Min):  {metrics['living_cost_gap_min']:>8.2f}$\n"
+        text += f"  • Living Cost Gap (Mean): {metrics['living_cost_gap_mean']:>8.2f}$\n"
+        text += f"  • Living Cost Gap (Std):  {metrics['living_cost_gap_std']:>8.2f}$\n"
         text += "\n"
         return text
     
@@ -404,7 +393,7 @@ class InvestmentControlPanel(QWidget):
         row += 1
         # Start Total
         self.start_total_slider = QSlider(Qt.Horizontal)
-        self.start_total_slider.setRange(0, int(USD(2000)))  # Scale by 10 for decimal precision
+        self.start_total_slider.setRange(1, int(USD(2000)))  # Scale by 10 for decimal precision
         self.start_total_slider.valueChanged.connect(self._on_change)
         self.start_total_label = QLabel()
         row += 1
@@ -413,7 +402,7 @@ class InvestmentControlPanel(QWidget):
         row += 1
         # Annual Cost
         self.cost_slider = QSlider(Qt.Horizontal)
-        self.cost_slider.setRange(0, int(USD(500)))  # Scale by 100 for decimal precision
+        self.cost_slider.setRange(1, int(USD(500)))  # Scale by 100 for decimal precision
         self.cost_slider.valueChanged.connect(self._on_change)
         self.cost_label = QLabel()
         row += 1
@@ -526,6 +515,22 @@ class InvestmentControlPanel(QWidget):
 
     def set_parameters(self, params: InvestmentParams):
         """Set all sliders and checkboxes from parameter object."""
+        # Temporarily disconnect signals to avoid triggering onChange during parameter setting
+        self.start_year_slider.valueChanged.disconnect()
+        self.duration_slider.valueChanged.disconnect()
+        self.retire_offset_slider.valueChanged.disconnect()
+        self.start_total_slider.valueChanged.disconnect()
+        self.cost_slider.valueChanged.disconnect()
+        self.cpi_slider.valueChanged.disconnect()
+        self.interest_rate_slider.valueChanged.disconnect()
+        self.new_savings_slider.valueChanged.disconnect()
+        self.stock_weight_slider.valueChanged.disconnect()
+        self.use_sp500_checkbox.stateChanged.disconnect()
+        self.use_real_interest_checkbox.stateChanged.disconnect()
+        self.use_real_cpi_checkbox.stateChanged.disconnect()
+        self.adptive_withdraw_rate_checkbox.stateChanged.disconnect()
+        
+        # Set values without triggering signals
         self.start_year_slider.setValue(params.start_year)
         self.duration_slider.setValue(params.duration)
         self.retire_offset_slider.setValue(params.retire_offset)
@@ -539,7 +544,21 @@ class InvestmentControlPanel(QWidget):
         self.use_real_cpi_checkbox.setChecked(params.use_real_cpi)
         self.stock_weight_slider.setValue(int(params.stock_weight * 100))
         self.adptive_withdraw_rate_checkbox.setChecked(params.adptive_withdraw_rate)
-        self._on_change()
+        
+        # Reconnect signals
+        self.start_year_slider.valueChanged.connect(self._on_change)
+        self.duration_slider.valueChanged.connect(self._on_change)
+        self.retire_offset_slider.valueChanged.connect(self._on_change)
+        self.start_total_slider.valueChanged.connect(self._on_change)
+        self.cost_slider.valueChanged.connect(self._on_change)
+        self.cpi_slider.valueChanged.connect(self._on_change)
+        self.interest_rate_slider.valueChanged.connect(self._on_change)
+        self.new_savings_slider.valueChanged.connect(self._on_change)
+        self.stock_weight_slider.valueChanged.connect(self._on_change)
+        self.use_sp500_checkbox.stateChanged.connect(self._on_change)
+        self.use_real_interest_checkbox.stateChanged.connect(self._on_change)
+        self.use_real_cpi_checkbox.stateChanged.connect(self._on_change)
+        self.adptive_withdraw_rate_checkbox.stateChanged.connect(self._on_change)
 
     def get_parameters(self) -> InvestmentParams:
         """Create a new InvestmentParams instance with current UI control values."""
@@ -562,7 +581,10 @@ class InvestmentControlPanel(QWidget):
     def reset(self):
         """Reset all controls to default values."""
         self.set_parameters(InvestmentParams.get_defaults())
+        self._on_change()
+        # Disconnect signals temporarily to avoid triggering on change
         self.show_benchmark_checkbox.setChecked(True)
+
 
     def update(self, msg: str=""):
         """Update the results text display with formatted analysis."""
@@ -662,14 +684,11 @@ class InvestmentPlotPanel(QWidget):
             # Bias adjustment: corrects for inflation compounding on new savings contributions
             # Each year's new savings experiences different inflation periods, so we subtract
             # the excess inflation to get an accurate baseline for comparison
-            bias_benchmark_total = [
+            bias_benchmark_total = np.cumsum([
                 years_result.series('new_savings')[idx] * (
-                    years_result.params.get_real_inflation_rate_multiplier(
-                        year, start_year=years_result.params.start_year
-                    ) - 1
+                    years_result.params.get_real_inflation_rate_multiplier(year) - 1
                 ) for idx, year in enumerate(years)
-            ]
-            bias_benchmark_total = np.cumsum(bias_benchmark_total)
+            ])
             benchmark_total = [
                 years_result.series('principle')[idx] * 
                 years_result.params.get_real_inflation_rate_multiplier(year) 
@@ -702,7 +721,8 @@ class InvestmentPlotPanel(QWidget):
                                symbol='t', symbolSize=4, symbolBrush='purple')
         
         # Plot 5: Annual Withdrawals
-        self.plot_withdraw.plot(years, years_result.series('withdraw', lambda v: round(v, 2)), 
+        withdraw_data = years_result.series('withdraw', lambda v: round(v, 2))
+        self.plot_withdraw.plot(years, withdraw_data, 
                                pen=pg.mkPen(color='brown', width=2), 
                                symbol='h', symbolSize=4, symbolBrush='brown')
         
@@ -712,11 +732,24 @@ class InvestmentPlotPanel(QWidget):
             self.plot_withdraw.plot(years, benchmark_withdrawals, 
                                 pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
                                 name='Target Cost')
-                
+            # Add text labels showing exact values on each point
+            # for i, (year, value) in enumerate(zip(years, withdraw_data)):
+            #     text_item = pg.TextItem(f'{(value+1e-16)/(benchmark_withdrawals[i]+1e-16) * years_result.params.cost / 12:.2f}', anchor=(0.5, 1.2), color='yellow')
+            #     font = text_item.textItem.font()
+            #     font.setPointSize(6)
+            #     text_item.textItem.setFont(font)
+            #     text_item.setPos(year, value)
+            #     self.plot_withdraw.addItem(text_item)
+
         # Plot 6: Interest VS Principle
         self.plot_ratio.plot(years, years_result.series('withdrawed_interest_vs_principle'), 
                             pen=pg.mkPen(color='red', width=2), 
                             symbol='d', symbolSize=4, symbolBrush='red')
+        
+        # Also plot interest vs principle
+        self.plot_ratio.plot(years, years_result.series('interest_vs_principle'), 
+                            pen=pg.mkPen(color='blue', width=2), 
+                            symbol='o', symbolSize=4, symbolBrush='blue')
 
         if self.show_benchmark:
             # Add benchmark line for interest vs principle plot
@@ -800,3 +833,27 @@ class InvestmentSimulator(QMainWindow):
 
 if __name__ == "__main__":
     InvestmentSimulator.main()
+    # import cProfile
+    # import pstats
+    # import io
+    
+    # # Create profiler
+    # profiler = cProfile.Profile()
+    # profiler.enable()
+    
+    # try:
+    #     InvestmentSimulator.main()
+    # finally:
+    #     profiler.disable()
+        
+    #     # Create a string buffer to capture profiler output
+    #     s = io.StringIO()
+    #     ps = pstats.Stats(profiler, stream=s)
+    #     ps.sort_stats('cumulative')
+    #     # Filter to only show functions from our code (not built-ins or libraries)
+    #     ps.print_stats('invest.*\.py', 50)
+        
+    #     print("\n" + "="*50)
+    #     print("PERFORMANCE PROFILE")
+    #     print("="*50)
+    #     print(s.getvalue())

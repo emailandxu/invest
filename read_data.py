@@ -1,5 +1,7 @@
 from functools import lru_cache, reduce
 import csv
+import pickle
+import os
 
 def read_data(csv_path='data/sp500.csv'):
     """
@@ -198,14 +200,18 @@ def get_change_rate_by_year(data, year, default=None):
         return None
     
     # Find the row for the given year
-    year_row = None
-    for row in data:
-        if row.get('Year') == year:
-            year_row = row
-            break
-    
-    if year_row is None:
+    # year_row = None
+    # for row in data:
+    #     if row.get('Year') == year:
+    #         year_row = row
+    #         break
+    # if year_row is None:
+    #     return default
+    year_index = year - data[0].get('Year') 
+    if year_index < 0 or year_index >= len(data):
         return default
+    
+    year_row = data[year_index]
     
     # Return the change rate for that year
     return year_row.get('Change_Rate')
@@ -215,30 +221,66 @@ def get_value_by_year(data, year, default=None):
         return None
     
     # Find the row for the given year
-    year_row = None
-    for row in data:
-        if row.get('Year') == year:
-            year_row = row
-            break
+    # year_row = None
+    # for row in data:
+    #     if row.get('Year') == year:
+    #         year_row = row
+    #         break
     
-    if year_row is None:
+    # if year_row is None:
+    #     return default
+
+    year_index = year - data[0].get('Year') 
+    if year_index < 0 or year_index >= len(data):
         return default
-    
+    year_row = data[year_index]
     # Return the change rate for that year
     return year_row.get('Value')
 
 
 @lru_cache(maxsize=None)
 def sp500_data():
-    data = read_data(csv_path="data/sp500.csv")
+    csv_path = "data/sp500.csv"
+    pickle_path = os.path.splitext(csv_path)[0] + "_processed.pkl"
+    
+    # Try to load from pickle cache first
+    if os.path.exists(pickle_path):
+        try:
+            with open(pickle_path, 'rb') as f:
+                return pickle.load(f)
+        except (pickle.PickleError, EOFError, FileNotFoundError):
+            pass  # Fall through to recompute if pickle is corrupted
+    
+    # Process the data
+    data = read_data(csv_path=csv_path)
     year_data = extract_year_end_data_by_month(data, month=12)
     year_data = compute_annual_change_rate(year_data)
     # year_data = filter_data_after_1960(year_data)
+    
+    # Save to pickle cache
+    try:
+        with open(pickle_path, 'wb') as f:
+            pickle.dump(year_data, f)
+    except (pickle.PickleError, IOError):
+        pass  # Continue even if we can't save the cache
+    
     return year_data
 
 @lru_cache(maxsize=None)
 def interest_data():
-    data = read_data(csv_path="data/interest.csv")
+    csv_path = "data/interest.csv"
+    pickle_path = os.path.splitext(csv_path)[0] + "_processed.pkl"
+    
+    # Try to load from pickle cache first
+    if os.path.exists(pickle_path):
+        try:
+            with open(pickle_path, 'rb') as f:
+                return pickle.load(f)
+        except (pickle.PickleError, EOFError, FileNotFoundError):
+            pass  # Fall through to recompute if pickle is corrupted
+    
+    # Process the data
+    data = read_data(csv_path=csv_path)
     # year_data = extract_year_end_data_by_month(data, month=12)
     year_data = extract_year_data_by_mean(data)
     year_data = compute_annual_change_rate(year_data)
@@ -249,11 +291,31 @@ def interest_data():
                 row['Value'] = float(row['Value']) / 100
             except (ValueError, TypeError):
                 row['Value'] = None
+    
+    # Save to pickle cache
+    try:
+        with open(pickle_path, 'wb') as f:
+            pickle.dump(year_data, f)
+    except (pickle.PickleError, IOError):
+        pass  # Continue even if we can't save the cache
+    
     return year_data
 
 @lru_cache(maxsize=None)
 def inflation_data():
-    data = read_data(csv_path="data/inflation.csv")
+    csv_path = "data/inflation.csv"
+    pickle_path = os.path.splitext(csv_path)[0] + "_processed.pkl"
+    
+    # Try to load from pickle cache first
+    if os.path.exists(pickle_path):
+        try:
+            with open(pickle_path, 'rb') as f:
+                return pickle.load(f)
+        except (pickle.PickleError, EOFError, FileNotFoundError):
+            pass  # Fall through to recompute if pickle is corrupted
+    
+    # Process the data
+    data = read_data(csv_path=csv_path)
     year_data = extract_year_end_data_by_month(data, month=12)
     year_data = compute_annual_change_rate(year_data)
     # Convert value to float, divide by 100, and add 1.0 for interest rate processing
@@ -263,7 +325,23 @@ def inflation_data():
                 row['Value'] = float(row['Value']) / 100
             except (ValueError, TypeError):
                 row['Value'] = None
+    
+    # Save to pickle cache
+    try:
+        with open(pickle_path, 'wb') as f:
+            pickle.dump(year_data, f)
+    except (pickle.PickleError, IOError):
+        pass  # Continue even if we can't save the cache
+    
     return year_data
+
+@lru_cache()
+def inflation_rate_multiplier(year, start_year, default=0.00):
+    cpi = 1 + get_value_by_year(inflation_data(), year, default=default)
+    if year <= start_year:
+        return cpi
+    else:
+        return cpi * inflation_rate_multiplier(year-1, start_year, default=default)
 
 def gui_data(data):
     import tkinter as tk
@@ -442,6 +520,16 @@ def gui_data(data):
     create_gui()
 
 if __name__ == "__main__":
-    gui_data(interest_data())
-    print(interest_data())
-    print(get_change_rate_by_year(2010))
+    # gui_data(interest_data())
+    # print(interest_data())
+    # print(get_change_rate_by_year(2010))
+    import time
+    t0 = time.time()
+    print(inflation_rate_multiplier(2025, 1995))
+    t1 = time.time()
+    print(f"Time taken: {t1 - t0:.6f} seconds")
+    
+    t0 = time.time()
+    print(inflation_rate_multiplier(2021, 1995))
+    t1 = time.time()
+    print(f"Time taken: {t1 - t0:.6f} seconds")
