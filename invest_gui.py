@@ -21,7 +21,7 @@ class InvestmentParams:
     duration: int = 25
     retire_offset: int = 0
     start_total: float = USD(30)
-    cost: float = USD(0.7)
+    cost: float = USD(1.2)
     cpi: float = 0.00
     interest_rate: float = 0.00
     new_savings: float = USD(3.0)
@@ -123,7 +123,7 @@ class StrategyBasic(InvestmentParams):
     
     def get_withdraw_rate(self, year, total):
         """Get withdrawal rate for a given year and total."""
-        target_living_cost_withdraw_rate = ((self.cost+1e-16) / (total + 1e-16)) * self.get_inflation_rate_multiplier(year)
+        target_living_cost_withdraw_rate = min(((self.cost+1e-16) / (total + 1e-16)) * self.get_inflation_rate_multiplier(year), 1.0)
 
         if self.adptive_withdraw_rate:
             central_ratio = 0.028
@@ -332,7 +332,7 @@ class InvestmentYearsResult:
         """Generate a comprehensive analysis report from the simulation results."""
         results_text = ""
         results_text += self.financial_summary
-        results_text += self.interest_rate_summary
+        # results_text += self.interest_rate_summary
         results_text += self.sustainability_summary
         return results_text
     
@@ -733,13 +733,13 @@ class InvestmentPlotPanel(QWidget):
                                 pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
                                 name='Target Cost')
             # Add text labels showing exact values on each point
-            # for i, (year, value) in enumerate(zip(years, withdraw_data)):
-            #     text_item = pg.TextItem(f'{(value+1e-16)/(benchmark_withdrawals[i]+1e-16) * years_result.params.cost / 12:.2f}', anchor=(0.5, 1.2), color='yellow')
-            #     font = text_item.textItem.font()
-            #     font.setPointSize(6)
-            #     text_item.textItem.setFont(font)
-            #     text_item.setPos(year, value)
-            #     self.plot_withdraw.addItem(text_item)
+            for i, (year, value) in enumerate(zip(years, withdraw_data)):
+                text_item = pg.TextItem(f'{(value+1e-16)/(benchmark_withdrawals[i]+1e-16) * years_result.params.cost / 12:.2f}', anchor=(0.5, 1.2), color='yellow')
+                font = text_item.textItem.font()
+                font.setPointSize(6)
+                text_item.textItem.setFont(font)
+                text_item.setPos(year, value)
+                self.plot_withdraw.addItem(text_item)
 
         # Plot 6: Interest VS Principle
         self.plot_ratio.plot(years, years_result.series('withdrawed_interest_vs_principle'), 
