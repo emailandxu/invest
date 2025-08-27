@@ -123,21 +123,36 @@ class StrategyBasic(InvestmentParams):
     
     def get_withdraw_rate(self, year, total):
         """Get withdrawal rate for a given year and total."""
-        target_living_cost_withdraw_rate = min(((self.cost+1e-16) / (total + 1e-16)) * self.get_inflation_rate_multiplier(year), 1.0)
+        target_living_ratio = min(((self.cost+1e-16) / (max(total, 1e-16))) * self.get_inflation_rate_multiplier(year), 1.0)
+
+        def my_log_function(x, arg_max=10):
+            """When 1 < x < arg_max, the function approaching 1 is log speed, arg_max < x < inf,
+            the function approaching 0 is log speed, while x < 1 is not acceptable."""
+            if x > arg_max:
+                return 1
+            if x < 1:
+                return 0
+            ln_arg_max = np.log(arg_max)
+            a = 1.0 / ln_arg_max
+            k = np.exp(1) / ln_arg_max
+            return k * np.log(x) / (x ** a)
+        
+        withdraw_rate = target_living_ratio
 
         if self.adptive_withdraw_rate:
-            central_ratio = 0.028
-            extra_ratio = (target_living_cost_withdraw_rate / central_ratio)
-            if extra_ratio >= 1:
-                extra_part = np.log(extra_ratio) / extra_ratio * central_ratio
-                return central_ratio + extra_part
+            upper_bound = 0.0575
+            center_ratio = upper_bound / 2
+            if target_living_ratio > center_ratio:
+                upper_bound_remains = upper_bound - center_ratio
+                log_scale = my_log_function(target_living_ratio / center_ratio, arg_max=1/center_ratio) # because target_living_ratio is approching 1
+                withdraw_rate = center_ratio + log_scale * upper_bound_remains
             else:
-                extra_part = 1 / extra_ratio
-                extra_part = np.log(extra_part) / extra_part * central_ratio
-
-                return target_living_cost_withdraw_rate + extra_part
-        else:
-            return target_living_cost_withdraw_rate
+                # upper_bound = 0.04
+                upper_bound_remains = upper_bound - target_living_ratio
+                log_scale = my_log_function(center_ratio / target_living_ratio, arg_max=2e2*center_ratio) # because 1/target_living_ratio is approching inf
+                withdraw_rate = target_living_ratio + log_scale * upper_bound_remains
+        
+        return withdraw_rate
 
 class StrategyBondsPriorSell(StrategyBasic):
     @classmethod
@@ -193,6 +208,7 @@ class StrategyBondsPriorSell(StrategyBasic):
             self.stock_total_of_year[year] -= withdraw
 
         if stock_weight := self.get_stock_weight(year) > (self.stock_weight - 0.01) :
+            # reblance
             bias = self.stock_total_of_year[year] * (stock_weight - (self.stock_weight - 0.01))
             self.stock_total_of_year[year] -= bias
             self.bonds_total_of_year[year] += bias
