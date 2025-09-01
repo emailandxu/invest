@@ -1,12 +1,13 @@
+import os
 import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QGridLayout, QLabel, QSlider, 
-                            QCheckBox, QPushButton, QTextEdit)
+                            QCheckBox, QPushButton, QTextEdit, QComboBox)
 from PyQt5.QtCore import Qt
 import pyqtgraph as pg
 import numpy as np
 from functools import lru_cache, reduce
-from read_data import get_change_rate_by_year, get_value_by_year, sp500_data, interest_data, inflation_data, inflation_rate_multiplier
+from read_data import get_change_rate_by_year, get_value_by_year, stock_data, interest_data, inflation_data, inflation_rate_multiplier
 from invest import invest
 from utils import USD
 
@@ -26,6 +27,7 @@ class InvestmentParams:
     interest_rate: float = 0.00
     new_savings: float = USD(3.0)
     stock_weight: float = 1.0
+    stock_code: str = "SP500"
     use_sp500: bool = True
     use_real_interest: bool = True
     use_real_cpi: bool = True
@@ -46,6 +48,7 @@ class InvestmentParams:
             self.use_real_cpi,
             self.new_savings,
             self.stock_weight,
+            self.stock_code,
             self.adptive_withdraw_rate
         ))
     
@@ -66,7 +69,7 @@ class InvestmentParams:
     
     def sp500_interest_rate(self, year):
         """Get interest rate for a given year based on parameters."""
-        return get_change_rate_by_year(sp500_data(), year, default=self.interest_rate)
+        return get_change_rate_by_year(stock_data(self.stock_code), year, default=self.interest_rate)
 
     def real_interest_rate(self, year):
         """Get interest rate for a given year based on parameters."""
@@ -98,6 +101,7 @@ class StrategyBasic(InvestmentParams):
         strategy.use_real_cpi = params.use_real_cpi
         strategy.new_savings = params.new_savings
         strategy.stock_weight = params.stock_weight
+        strategy.stock_code = params.stock_code
         strategy.adptive_withdraw_rate = params.adptive_withdraw_rate
         return strategy
 
@@ -113,6 +117,8 @@ class StrategyBasic(InvestmentParams):
         if self.use_sp500 and self.use_real_interest:
             stock_rate = self.sp500_interest_rate(year)
             interest_rate = self.real_interest_rate(year)
+            if stock_rate is None:
+                breakpoint()
             return stock_rate * self.stock_weight + interest_rate * (1 - self.stock_weight)
         elif self.use_sp500:
             return self.sp500_interest_rate(year)
@@ -348,7 +354,7 @@ class InvestmentYearsResult:
         """Generate a comprehensive analysis report from the simulation results."""
         results_text = ""
         results_text += self.financial_summary
-        # results_text += self.interest_rate_summary
+        results_text += self.interest_rate_summary
         results_text += self.sustainability_summary
         return results_text
     
@@ -463,6 +469,17 @@ class InvestmentControlPanel(QWidget):
         grid_layout.addWidget(self.stock_weight_label, row, 1)
         row += 1
 
+        # Stock Code Selection
+        self.stock_code_combo = QComboBox()
+        # self.stock_code_combo.addItems(["SP500", "COKE", "BRKB"])
+        self.stock_code_combo.addItems([path.split(".")[0] for path in os.listdir("data/STOCK") if path.endswith(".csv")])
+        self.stock_code_combo.currentTextChanged.connect(self._on_change)
+        self.stock_code_label = QLabel("Stock Code:")
+        row += 1
+        grid_layout.addWidget(self.stock_code_label, row, 0)
+        grid_layout.addWidget(self.stock_code_combo, row, 1)
+        row += 1
+
         layout.addWidget(grid_widget)
 
         # Reset button
@@ -541,6 +558,7 @@ class InvestmentControlPanel(QWidget):
         self.interest_rate_slider.valueChanged.disconnect()
         self.new_savings_slider.valueChanged.disconnect()
         self.stock_weight_slider.valueChanged.disconnect()
+        self.stock_code_combo.currentTextChanged.disconnect()
         self.use_sp500_checkbox.stateChanged.disconnect()
         self.use_real_interest_checkbox.stateChanged.disconnect()
         self.use_real_cpi_checkbox.stateChanged.disconnect()
@@ -559,6 +577,7 @@ class InvestmentControlPanel(QWidget):
         self.use_real_interest_checkbox.setChecked(params.use_real_interest)
         self.use_real_cpi_checkbox.setChecked(params.use_real_cpi)
         self.stock_weight_slider.setValue(int(params.stock_weight * 100))
+        self.stock_code_combo.setCurrentText(params.stock_code)
         self.adptive_withdraw_rate_checkbox.setChecked(params.adptive_withdraw_rate)
         
         # Reconnect signals
@@ -571,6 +590,7 @@ class InvestmentControlPanel(QWidget):
         self.interest_rate_slider.valueChanged.connect(self._on_change)
         self.new_savings_slider.valueChanged.connect(self._on_change)
         self.stock_weight_slider.valueChanged.connect(self._on_change)
+        self.stock_code_combo.currentTextChanged.connect(self._on_change)
         self.use_sp500_checkbox.stateChanged.connect(self._on_change)
         self.use_real_interest_checkbox.stateChanged.connect(self._on_change)
         self.use_real_cpi_checkbox.stateChanged.connect(self._on_change)
@@ -591,6 +611,7 @@ class InvestmentControlPanel(QWidget):
         params.use_real_cpi = self.use_real_cpi_checkbox.isChecked()
         params.new_savings = self.new_savings_slider.value() / 100  # Scale down from cents to dollars
         params.stock_weight = self.stock_weight_slider.value() / 100  # Scale down from cents to dollars
+        params.stock_code = self.stock_code_combo.currentText()
         params.adptive_withdraw_rate = self.adptive_withdraw_rate_checkbox.isChecked()
         return params
 

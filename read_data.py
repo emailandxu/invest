@@ -55,8 +55,20 @@ def extract_year_end_data_by_month(data, month=12):
                     except ValueError:
                         continue
         
-        # Get the specified month data of each year
-        year_data = [row for row in data if row.get('Month') == month]
+        # Get the specified month data of each year (last entry if multiple exist)
+        year_groups = {}
+        for row in data:
+            year = row.get('Year')
+            month_val = row.get('Month')
+            if year is not None and month_val == month:
+                if year not in year_groups:
+                    year_groups[year] = []
+                year_groups[year].append(row)
+        
+        # Get the last entry for each year in case there are multiple rows for the same month
+        year_data = []
+        for year in sorted(year_groups.keys()):
+            year_data.append(year_groups[year][-1])
     else:
         year_data = None
     
@@ -214,7 +226,10 @@ def get_change_rate_by_year(data, year, default=None):
     year_row = data[year_index]
     
     # Return the change rate for that year
-    return year_row.get('Change_Rate')
+    value = year_row.get('Change_Rate')
+    if value is None:
+        return default
+    return value
 
 def get_value_by_year(data, year, default=None):
     if data is None or len(data) == 0:
@@ -239,30 +254,31 @@ def get_value_by_year(data, year, default=None):
 
 
 @lru_cache(maxsize=None)
-def sp500_data():
-    csv_path = "data/sp500.csv"
+def stock_data(code="SP500"):
+    csv_path = "data/STOCK/{}.csv".format(code)
     pickle_path = os.path.splitext(csv_path)[0] + "_processed.pkl"
     
     # Try to load from pickle cache first
-    if os.path.exists(pickle_path):
-        try:
-            with open(pickle_path, 'rb') as f:
-                return pickle.load(f)
-        except (pickle.PickleError, EOFError, FileNotFoundError):
-            pass  # Fall through to recompute if pickle is corrupted
+    # if os.path.exists(pickle_path):
+    #     try:
+    #         with open(pickle_path, 'rb') as f:
+    #             return pickle.load(f)
+    #     except (pickle.PickleError, EOFError, FileNotFoundError):
+    #         pass  # Fall through to recompute if pickle is corrupted
     
     # Process the data
     data = read_data(csv_path=csv_path)
     year_data = extract_year_end_data_by_month(data, month=12)
+    # year_data = extract_year_data_by_mean(data)
     year_data = compute_annual_change_rate(year_data)
     # year_data = filter_data_after_1960(year_data)
     
     # Save to pickle cache
-    try:
-        with open(pickle_path, 'wb') as f:
-            pickle.dump(year_data, f)
-    except (pickle.PickleError, IOError):
-        pass  # Continue even if we can't save the cache
+    # try:
+    #     with open(pickle_path, 'wb') as f:
+    #         pickle.dump(year_data, f)
+    # except (pickle.PickleError, IOError):
+    #     pass  # Continue even if we can't save the cache
     
     return year_data
 
