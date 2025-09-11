@@ -7,7 +7,7 @@ from PyQt5.QtCore import Qt
 import pyqtgraph as pg
 import numpy as np
 from functools import lru_cache, reduce
-from read_data import get_change_rate_by_year, get_value_by_year, stock_data, interest_data, inflation_data, inflation_rate_multiplier
+from read_data import get_change_rate_by_year, get_value_by_year, stock_data, portfolio_data, interest_data, inflation_data, inflation_rate_multiplier
 from invest import invest
 from utils import USD
 
@@ -26,9 +26,8 @@ class InvestmentParams:
     cpi: float = 0.00
     interest_rate: float = 0.00
     new_savings: float = USD(3.0)
-    stock_weight: float = 1.0
-    stock_code: str = "SP500"
-    use_sp500: bool = True
+    stock_code: str = "portfolio"
+    use_portfolio: bool = True
     use_real_interest: bool = True
     use_real_cpi: bool = True
     adptive_withdraw_rate: bool = True
@@ -43,11 +42,10 @@ class InvestmentParams:
             self.cost,
             self.cpi,
             self.interest_rate,
-            self.use_sp500,
+            self.use_portfolio,
             self.use_real_interest,
             self.use_real_cpi,
             self.new_savings,
-            self.stock_weight,
             self.stock_code,
             self.adptive_withdraw_rate
         ))
@@ -67,9 +65,12 @@ class InvestmentParams:
         """Create an instance with default values."""
         return cls()
     
-    def sp500_interest_rate(self, year):
+    def portfolio_interest_rate(self, year):
         """Get interest rate for a given year based on parameters."""
-        return get_change_rate_by_year(stock_data(self.stock_code), year, default=self.interest_rate)
+        if self.stock_code == "portfolio":
+            return sum([ratio * get_change_rate_by_year(stock_data(code), year, default=self.interest_rate) for (code, ratio) in portfolio_data().items()])
+        else:
+            return get_change_rate_by_year(stock_data(self.stock_code), year, default=self.interest_rate)
 
     def real_interest_rate(self, year):
         """Get interest rate for a given year based on parameters."""
@@ -96,11 +97,10 @@ class StrategyBasic(InvestmentParams):
         strategy.cost = params.cost
         strategy.cpi = params.cpi
         strategy.interest_rate = params.interest_rate
-        strategy.use_sp500 = params.use_sp500
+        strategy.use_portfolio = params.use_portfolio
         strategy.use_real_interest = params.use_real_interest
         strategy.use_real_cpi = params.use_real_cpi
         strategy.new_savings = params.new_savings
-        strategy.stock_weight = params.stock_weight
         strategy.stock_code = params.stock_code
         strategy.adptive_withdraw_rate = params.adptive_withdraw_rate
         return strategy
@@ -113,15 +113,8 @@ class StrategyBasic(InvestmentParams):
             return 0
 
     def get_interest_rate(self, year, total):
-        """Get interest rate for a given year based on parameters."""
-        if self.use_sp500 and self.use_real_interest:
-            stock_rate = self.sp500_interest_rate(year)
-            interest_rate = self.real_interest_rate(year)
-            if stock_rate is None:
-                breakpoint()
-            return stock_rate * self.stock_weight + interest_rate * (1 - self.stock_weight)
-        elif self.use_sp500:
-            return self.sp500_interest_rate(year)
+        if self.use_portfolio:
+            return self.portfolio_interest_rate(year)
         elif self.use_real_interest:
             return self.real_interest_rate(year)
         else:
@@ -159,71 +152,6 @@ class StrategyBasic(InvestmentParams):
                 withdraw_rate = target_living_ratio + log_scale * upper_bound_remains
         
         return withdraw_rate
-
-class StrategyBondsPriorSell(StrategyBasic):
-    @classmethod
-    def from_params(cls, params: InvestmentParams):
-        strategy = super().from_params(params)
-        strategy.stock_total_of_year = {
-            params.start_year - 1: params.start_total * params.stock_weight
-        }
-        strategy.bonds_total_of_year = {
-            params.start_year - 1: params.start_total * (1 - params.stock_weight)
-        }
-        return strategy
-    
-    def get_stock_weight(self, year):
-        try:
-            return self.stock_total_of_year[year] / (self.stock_total_of_year[year] + self.bonds_total_of_year[year] + 1e-16)
-        except KeyError:
-            return self.stock_weight
-    
-    def get_interest_rate(self, year, total):
-        """Get interest rate for a given year based on parameters."""
-        if self.use_sp500 and self.use_real_interest:
-            stock_rate = self.sp500_interest_rate(year) 
-            interest_rate = self.real_interest_rate(year)
-
-            stock_weight = self.get_stock_weight(year-1)
-            self.stock_total_of_year[year] = (stock_rate+1) * total * stock_weight
-            self.bonds_total_of_year[year] = (interest_rate+1) * total * (1 - stock_weight)
-            
-            return stock_rate * stock_weight + interest_rate * (1 - stock_weight)
-        
-        elif self.use_sp500:
-            self.stock_total_of_year[year] = (self.sp500_interest_rate(year)+1) * total * self.get_stock_weight(year-1) 
-            self.bonds_total_of_year[year] = 0
-            return self.sp500_interest_rate(year)
-        elif self.use_real_interest:
-            self.stock_total_of_year[year] = 0
-            self.bonds_total_of_year[year] = (self.real_interest_rate(year)+1) * total
-            return self.real_interest_rate(year)
-        else:
-            self.stock_total_of_year[year] = 0
-            self.bonds_total_of_year[year] = (self.interest_rate+1) * total
-            return self.interest_rate
-    
-    def get_withdraw_rate(self, year, total):
-        """Get withdrawal rate for a given year and total."""
-        withdraw_rate = super().get_withdraw_rate(year, total)
-        withdraw = total * withdraw_rate
-
-        if  self.get_stock_weight(year) < self.stock_weight:
-            self.bonds_total_of_year[year] -= withdraw
-        else:
-            self.stock_total_of_year[year] -= withdraw
-
-        if stock_weight := self.get_stock_weight(year) > (self.stock_weight - 0.01) :
-            # reblance
-            bias = self.stock_total_of_year[year] * (stock_weight - (self.stock_weight - 0.01))
-            self.stock_total_of_year[year] -= bias
-            self.bonds_total_of_year[year] += bias
-
-
-        # print(f"Year {year}: Stock weight {self.get_stock_weight(year-1):.3f} -> {self.get_stock_weight(year):.3f} (Δ{self.get_stock_weight(year) - self.get_stock_weight(year-1):+.3f}) | Stock: ${self.stock_total_of_year[year]:.0f} | Bonds: ${self.bonds_total_of_year[year]:.0f} | Withdraw: ${withdraw:.0f}")
-
-        return withdraw_rate
-
     
 class InvestmentYearsResult:
     def __init__(self, params, years_result):
@@ -305,12 +233,12 @@ class InvestmentYearsResult:
         """Format financial summary section of results."""
         metrics = self.financial_stats
         text = "💰 FINANCIAL SUMMARY:\n"
+        text += f"  • CGAR:  {metrics['growth_rate']:>12.2%}\n"
         text += f"  • Final0:         {metrics['final_total']:>12,.2f}$\n"
         text += f"  • Final1:         {metrics['final_total']-metrics['final_withdraw_total']:>12,.2f}$\n"
         text += f"  • Total Min: {metrics['total_min']:>12,.2f}$\n"
         text += f"  • Withdraw Total: {metrics['final_withdraw_total']:>12,.2f}$\n"
         text += f"  • Interest Total: {metrics['final_interest_total']:>12,.2f}$\n"
-        text += f"  • CGAR:  {metrics['growth_rate']:>12.2%}\n"
         text += f"  • Final Principle: {self.years_result[-1]['principle']:>12,.2f}$\n"
         text += f"  • Inflation Rate: {metrics['inflation_rate']:>12.2%}\n"
         text += f"  • Living Cost Gap (Min):  {metrics['living_cost_gap_min']:>8.2f}$\n"
@@ -462,21 +390,13 @@ class InvestmentControlPanel(QWidget):
         grid_layout.addWidget(self.new_savings_slider, row, 0)
         grid_layout.addWidget(self.new_savings_label, row, 1)
         row += 1
-        
-        # Stock Weight
-        self.stock_weight_slider = QSlider(Qt.Horizontal)
-        self.stock_weight_slider.setRange(0, 100)
-        self.stock_weight_slider.valueChanged.connect(self._on_change)
-        self.stock_weight_label = QLabel()
-        row += 1
-        grid_layout.addWidget(self.stock_weight_slider, row, 0)
-        grid_layout.addWidget(self.stock_weight_label, row, 1)
-        row += 1
 
         # Stock Code Selection
         self.stock_code_combo = QComboBox()
-        # self.stock_code_combo.addItems(["SP500", "COKE", "BRKB"])
-        self.stock_code_combo.addItems([path.split(".")[0] for path in os.listdir("data/STOCK") if path.endswith(".csv")])
+        # self.stock_code_combo.addItems(["portfolio", "COKE", "BRKB"])
+        stock_codes = [path.split(".")[0].strip() for path in os.listdir("data/STOCK") if path.endswith(".csv")]
+        stock_codes = ["portfolio"] + [c for c in stock_codes if c]
+        self.stock_code_combo.addItems(stock_codes)
         self.stock_code_combo.currentTextChanged.connect(self._on_change)
         self.stock_code_label = QLabel("Stock Code:")
         row += 1
@@ -507,9 +427,9 @@ class InvestmentControlPanel(QWidget):
         # Real Data checkboxes
         real_data_widget = QWidget()
         real_data_layout = QGridLayout(real_data_widget)
-        self.use_sp500_checkbox = QCheckBox(text="Standard & Poor's 500")
-        self.use_sp500_checkbox.stateChanged.connect(self._on_change)
-        real_data_layout.addWidget(self.use_sp500_checkbox, 0, 0)
+        self.use_portfolio_checkbox = QCheckBox(text="Portfolio")
+        self.use_portfolio_checkbox.stateChanged.connect(self._on_change)
+        real_data_layout.addWidget(self.use_portfolio_checkbox, 0, 0)
                     
         self.use_real_interest_checkbox = QCheckBox(text="Federal Funds Rate")
         self.use_real_interest_checkbox.stateChanged.connect(self._on_change)
@@ -548,7 +468,6 @@ class InvestmentControlPanel(QWidget):
         self.cpi_label.setText(f"CPI: {self.cpi_slider.value() / 10000:.3f}")
         self.interest_rate_label.setText(f"Int.: {self.interest_rate_slider.value() / 10000:.3f}")
         self.new_savings_label.setText(f"Gain: {self.new_savings_slider.value() / 100:.2f}")
-        self.stock_weight_label.setText(f"StockWeight: {self.stock_weight_slider.value() / 100:.2f}")
 
     def set_parameters(self, params: InvestmentParams):
         """Set all sliders and checkboxes from parameter object."""
@@ -561,9 +480,8 @@ class InvestmentControlPanel(QWidget):
         self.cpi_slider.valueChanged.disconnect()
         self.interest_rate_slider.valueChanged.disconnect()
         self.new_savings_slider.valueChanged.disconnect()
-        self.stock_weight_slider.valueChanged.disconnect()
         self.stock_code_combo.currentTextChanged.disconnect()
-        self.use_sp500_checkbox.stateChanged.disconnect()
+        self.use_portfolio_checkbox.stateChanged.disconnect()
         self.use_real_interest_checkbox.stateChanged.disconnect()
         self.use_real_cpi_checkbox.stateChanged.disconnect()
         self.adptive_withdraw_rate_checkbox.stateChanged.disconnect()
@@ -577,10 +495,9 @@ class InvestmentControlPanel(QWidget):
         self.cpi_slider.setValue(int(params.cpi * 10000))
         self.interest_rate_slider.setValue(int(params.interest_rate * 10000))
         self.new_savings_slider.setValue(int(params.new_savings * 100))
-        self.use_sp500_checkbox.setChecked(params.use_sp500)
+        self.use_portfolio_checkbox.setChecked(params.use_portfolio)
         self.use_real_interest_checkbox.setChecked(params.use_real_interest)
         self.use_real_cpi_checkbox.setChecked(params.use_real_cpi)
-        self.stock_weight_slider.setValue(int(params.stock_weight * 100))
         self.stock_code_combo.setCurrentText(params.stock_code)
         self.adptive_withdraw_rate_checkbox.setChecked(params.adptive_withdraw_rate)
         
@@ -593,9 +510,8 @@ class InvestmentControlPanel(QWidget):
         self.cpi_slider.valueChanged.connect(self._on_change)
         self.interest_rate_slider.valueChanged.connect(self._on_change)
         self.new_savings_slider.valueChanged.connect(self._on_change)
-        self.stock_weight_slider.valueChanged.connect(self._on_change)
         self.stock_code_combo.currentTextChanged.connect(self._on_change)
-        self.use_sp500_checkbox.stateChanged.connect(self._on_change)
+        self.use_portfolio_checkbox.stateChanged.connect(self._on_change)
         self.use_real_interest_checkbox.stateChanged.connect(self._on_change)
         self.use_real_cpi_checkbox.stateChanged.connect(self._on_change)
         self.adptive_withdraw_rate_checkbox.stateChanged.connect(self._on_change)
@@ -610,11 +526,10 @@ class InvestmentControlPanel(QWidget):
         params.cost = self.cost_slider.value() / 100  # Scale down from cents to dollars
         params.cpi = self.cpi_slider.value() / 10000  # Scale down for percentage precision
         params.interest_rate = self.interest_rate_slider.value() / 10000  # Scale down for percentage precision
-        params.use_sp500 = self.use_sp500_checkbox.isChecked()
+        params.use_portfolio = self.use_portfolio_checkbox.isChecked()
         params.use_real_interest = self.use_real_interest_checkbox.isChecked()
         params.use_real_cpi = self.use_real_cpi_checkbox.isChecked()
         params.new_savings = self.new_savings_slider.value() / 100  # Scale down from cents to dollars
-        params.stock_weight = self.stock_weight_slider.value() / 100  # Scale down from cents to dollars
         params.stock_code = self.stock_code_combo.currentText()
         params.adptive_withdraw_rate = self.adptive_withdraw_rate_checkbox.isChecked()
         return params
@@ -747,7 +662,7 @@ class InvestmentPlotPanel(QWidget):
         
         if self.show_benchmark:
             # Add benchmark line for real interest rate
-            benchmark_real_interest = [years_result.params.sp500_interest_rate(year) for year in years]
+            benchmark_real_interest = [years_result.params.portfolio_interest_rate(year) for year in years]
             self.plot_interest_rate.plot(years, benchmark_real_interest, 
                                         pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
                                         name='Real Interest Rate')

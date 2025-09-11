@@ -1,7 +1,58 @@
-from functools import lru_cache, reduce
 import csv
-import pickle
 import os
+import pickle
+from functools import lru_cache, reduce, wraps
+from typing import Dict
+def file_cache(filepath):
+    """
+    Decorator that caches function results based on file modification time and size.
+    If the file hasn't changed, returns cached result. If file changes, recomputes and caches new result.
+    
+    Args:
+        filepath (str): Path to the file to monitor for changes
+    
+    Returns:
+        Decorator function
+    """
+    def decorator(func):
+        cache = {}
+        
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Check if file exists
+            if not os.path.exists(filepath):
+                # If file doesn't exist, always call function
+                return func(*args, **kwargs)
+            
+            # Get file modification time and size for quick check
+            stat = os.stat(filepath)
+            mtime = stat.st_mtime
+            size = stat.st_size
+            
+            # Create a key from mtime and size
+            cache_key = f"{mtime}_{size}"
+            
+            # If we have a cached result with same mtime/size, return it
+            if cache_key in cache:
+                return cache[cache_key]
+            
+            # File has changed or no cache exists, compute new result
+            result = func(*args, **kwargs)
+            
+            # Cache the result
+            cache[cache_key] = result
+            
+            # Clean up old cache entries (keep only the latest)
+            if len(cache) > 1:
+                cache.clear()
+                cache[cache_key] = result
+            
+            return result
+        
+        return wrapper
+    return decorator
+
+
 
 def read_data(csv_path='data/sp500.csv'):
     """
@@ -350,6 +401,23 @@ def inflation_data():
         pass  # Continue even if we can't save the cache
     
     return year_data
+
+@file_cache("data/portfolio.csv")
+def portfolio_data() -> Dict[str, float]:
+    """
+    Read portfolio allocation data from CSV file.
+    
+    Returns:
+        Dict[str, float]: Dictionary mapping asset codes to their allocation ratios
+    """
+    csv_path = "data/portfolio.csv"
+    data = read_data(csv_path=csv_path)
+    pdata = data[0]
+    codes = list(map(lambda x: x.strip(), pdata.keys()))
+    ratios = [ float(pdata[code]) for code in codes ]
+    portfolio_data = dict(zip(codes,ratios))
+    print(portfolio_data)
+    return portfolio_data
 
 @lru_cache()
 def inflation_rate_multiplier(year, start_year, default=0.00):
