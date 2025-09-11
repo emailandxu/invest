@@ -240,6 +240,8 @@ class InvestmentYearsResult:
         final_withdraw_total = self.years_result[-1]['withdraw_total']
         final_interest_total = self.years_result[-1]['interest_total']
         
+        final_total += final_withdraw_total
+        
         # Find the year when total becomes zero or near zero
         zero_year = None
         for row in self.years_result:
@@ -303,11 +305,13 @@ class InvestmentYearsResult:
         """Format financial summary section of results."""
         metrics = self.financial_stats
         text = "💰 FINANCIAL SUMMARY:\n"
-        text += f"  • Final:         {metrics['final_total']:>12,.2f}$\n"
+        text += f"  • Final0:         {metrics['final_total']:>12,.2f}$\n"
+        text += f"  • Final1:         {metrics['final_total']-metrics['final_withdraw_total']:>12,.2f}$\n"
         text += f"  • Total Min: {metrics['total_min']:>12,.2f}$\n"
         text += f"  • Withdraw Total: {metrics['final_withdraw_total']:>12,.2f}$\n"
         text += f"  • Interest Total: {metrics['final_interest_total']:>12,.2f}$\n"
         text += f"  • CGAR:  {metrics['growth_rate']:>12.2%}\n"
+        text += f"  • Final Principle: {self.years_result[-1]['principle']:>12,.2f}$\n"
         text += f"  • Inflation Rate: {metrics['inflation_rate']:>12.2%}\n"
         text += f"  • Living Cost Gap (Min):  {metrics['living_cost_gap_min']:>8.2f}$\n"
         text += f"  • Living Cost Gap (Mean): {metrics['living_cost_gap_mean']:>8.2f}$\n"
