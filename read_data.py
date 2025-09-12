@@ -319,7 +319,7 @@ def stock_data(code="SP500"):
     
     # Process the data
     data = read_data(csv_path=csv_path)
-    year_data = extract_year_end_data_by_month(data, month=12)
+    year_data = extract_year_end_data_by_month(data, month=6)
     # year_data = extract_year_data_by_mean(data)
     year_data = compute_annual_change_rate(year_data)
     # year_data = filter_data_after_1960(year_data)

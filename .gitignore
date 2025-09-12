@@ -27,3 +27,5 @@ Thumbs.db
 
 # ._ files
 ._*
+
+data/STOCK/*
