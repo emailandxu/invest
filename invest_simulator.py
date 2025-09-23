@@ -15,6 +15,7 @@ class InvestmentParams:
     interest_rate: float = 0.00
     new_savings: float = USD(3.0)
     stock_code: str = "portfolio"
+    portfolio_data = portfolio_data()
     use_portfolio: bool = True
     use_real_interest: bool = True
     use_real_cpi: bool = True
@@ -56,7 +57,7 @@ class InvestmentParams:
     def portfolio_interest_rate(self, year):
         """Get interest rate for a given year based on parameters."""
         if self.stock_code == "portfolio":
-            return sum([ratio * get_change_rate_by_year(stock_data(code), year, default=self.interest_rate) for (code, ratio) in portfolio_data().items()])
+            return sum([ratio * get_change_rate_by_year(stock_data(code), year, default=self.interest_rate) for (code, ratio) in self.portfolio_data.items()])
         else:
             return get_change_rate_by_year(stock_data(self.stock_code), year, default=self.interest_rate)
 
