@@ -1,4 +1,5 @@
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
+from typing import Dict
 from utils import USD
 import numpy as np
 from read_data import get_change_rate_by_year, get_value_by_year, stock_data, portfolio_data, interest_data, inflation_data, inflation_rate_multiplier
@@ -15,7 +16,7 @@ class InvestmentParams:
     interest_rate: float = 0.00
     new_savings: float = USD(3.0)
     stock_code: str = "portfolio"
-    portfolio_data = portfolio_data()
+    portfolio_data: Dict[str, float] = field(default_factory=portfolio_data) 
     use_portfolio: bool = True
     use_real_interest: bool = True
     use_real_cpi: bool = True

@@ -14,13 +14,99 @@ from invest_simulator import InvestmentParams, StrategyBasic, InvestmentYearsRes
 from read_data import get_change_rate_by_year, get_value_by_year, stock_data, portfolio_data, interest_data, inflation_data, inflation_rate_multiplier
 from utils import USD
 
+
+class PortfolioAllocationWidget(QWidget):
+    def __init__(self, params:InvestmentParams=None, on_change=None):
+        super().__init__()
+        self._on_change = on_change
+        self.initial_values = params.portfolio_data if params is not None else portfolio_data()
+        self.portfolio_sliders = {}
+        self.portfolio_value_labels = {}
+        self.header_label = QLabel("Portfolio Allocation")
+        self.total_text_label = QLabel("Total")
+        self.portfolio_total_label = QLabel()
+        self._build_ui()
+        self.update_labels()
+
+    def _build_ui(self):
+        layout = QGridLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.header_label, 0, 0, 1, 3)
+
+        for idx, (code, ratio) in enumerate(self.initial_values.items(), start=1):
+            code_label = QLabel(code)
+            slider = QSlider(Qt.Horizontal)
+            slider.setRange(0, 100)
+            slider.setSingleStep(1)
+            slider.setPageStep(5)
+            slider_value = max(0, min(100, int(round(ratio * 100))))
+            slider.setValue(slider_value)
+            value_label = QLabel()
+
+            slider.valueChanged.connect(self._handle_change)
+
+            self.portfolio_sliders[code] = slider
+            self.portfolio_value_labels[code] = value_label
+
+            layout.addWidget(code_label, idx, 0)
+            layout.addWidget(slider, idx, 1)
+            layout.addWidget(value_label, idx, 2)
+
+        total_row = len(self.initial_values) + 1
+        layout.addWidget(self.total_text_label, total_row, 0)
+        layout.addWidget(self.portfolio_total_label, total_row, 2)
+
+    def set_on_change(self, callback):
+        self._on_change = callback
+
+    def _handle_change(self):
+        self.update_labels()
+        if self._on_change:
+            self._on_change()
+
+    def update_labels(self):
+        if not self.portfolio_sliders:
+            return
+
+        total_raw = sum(slider.value() for slider in self.portfolio_sliders.values())
+        normalizer = total_raw if total_raw > 0 else 1
+
+        for code, slider in self.portfolio_sliders.items():
+            normalized = (slider.value() / normalizer) * 100
+            self.portfolio_value_labels[code].setText(f"{normalized:5.1f}%")
+
+        self.portfolio_total_label.setText(f"Total: {total_raw:.0f}%")
+
+    def set_values(self, values):
+        if values is None:
+            return
+
+        for code, slider in self.portfolio_sliders.items():
+            slider.blockSignals(True)
+            slider_value = max(0, min(100, int(round(values.get(code, 0.0) * 100))))
+            slider.setValue(slider_value)
+            slider.blockSignals(False)
+        self.update_labels()
+
+    def get_portfolio_data(self):
+        if not self.portfolio_sliders:
+            return {}
+
+        raw = {code: slider.value() / 100 for code, slider in self.portfolio_sliders.items()}
+        total = sum(raw.values())
+        if total > 0:
+            return {code: value / total for code, value in raw.items()}
+        return {code: 0.0 for code in raw}
+
+
 class InvestmentControlPanel(QWidget):
     """Control panel widget containing all parameter sliders and checkboxes."""
     
-    def __init__(self, plot_panel, on_parameter_change=None):
+    def __init__(self, plot_panel, on_parameter_change=None, initial_params=None):
         super().__init__()
         self.plot_panel = plot_panel
         self.on_parameter_change = on_parameter_change
+        self.portfolio_widget = PortfolioAllocationWidget(initial_params, on_change=self._on_change)
         self.setup_ui()
     
     def setup_ui(self):
@@ -176,13 +262,14 @@ class InvestmentControlPanel(QWidget):
         self.show_benchmark_checkbox.stateChanged.connect(self._on_ui_control_change)
         real_data_layout.addWidget(self.show_benchmark_checkbox, 4, 0)
         layout.addWidget(real_data_widget)
+        layout.addWidget(self.portfolio_widget)
 
     def _on_change(self):
         """Internal callback that updates labels and triggers external callback."""
         self.update_labels()
         if self.on_parameter_change:
             self.on_parameter_change()
-    
+
     def _on_ui_control_change(self):
         self.plot_panel.show_benchmark = self.show_benchmark_checkbox.isChecked()
         self.plot_panel.update()
@@ -197,10 +284,10 @@ class InvestmentControlPanel(QWidget):
         self.cpi_label.setText(f"CPI: {self.cpi_slider.value() / 10000:.3f}")
         self.interest_rate_label.setText(f"Int.: {self.interest_rate_slider.value() / 10000:.3f}")
         self.new_savings_label.setText(f"Gain: {self.new_savings_slider.value() / 100:.2f}")
+        self.portfolio_widget.update_labels()
 
     def set_parameters(self, params: InvestmentParams):
         """Set all sliders and checkboxes from parameter object."""
-        # Temporarily disconnect signals to avoid triggering onChange during parameter setting
         self.start_year_slider.valueChanged.disconnect()
         self.duration_slider.valueChanged.disconnect()
         self.retire_offset_slider.valueChanged.disconnect()
@@ -214,8 +301,8 @@ class InvestmentControlPanel(QWidget):
         self.use_real_interest_checkbox.stateChanged.disconnect()
         self.use_real_cpi_checkbox.stateChanged.disconnect()
         self.adptive_withdraw_rate_checkbox.stateChanged.disconnect()
-        
-        # Set values without triggering signals
+        self.portfolio_widget.set_on_change(None)
+
         self.start_year_slider.setValue(params.start_year)
         self.duration_slider.setValue(params.duration)
         self.retire_offset_slider.setValue(params.retire_offset)
@@ -229,8 +316,8 @@ class InvestmentControlPanel(QWidget):
         self.use_real_cpi_checkbox.setChecked(params.use_real_cpi)
         self.stock_code_combo.setCurrentText(params.stock_code)
         self.adptive_withdraw_rate_checkbox.setChecked(params.adptive_withdraw_rate)
-        
-        # Reconnect signals
+        self.portfolio_widget.set_values(params.portfolio_data)
+
         self.start_year_slider.valueChanged.connect(self._on_change)
         self.duration_slider.valueChanged.connect(self._on_change)
         self.retire_offset_slider.valueChanged.connect(self._on_change)
@@ -240,10 +327,10 @@ class InvestmentControlPanel(QWidget):
         self.interest_rate_slider.valueChanged.connect(self._on_change)
         self.new_savings_slider.valueChanged.connect(self._on_change)
         self.stock_code_combo.currentTextChanged.connect(self._on_change)
-        self.use_portfolio_checkbox.stateChanged.connect(self._on_change)
         self.use_real_interest_checkbox.stateChanged.connect(self._on_change)
         self.use_real_cpi_checkbox.stateChanged.connect(self._on_change)
         self.adptive_withdraw_rate_checkbox.stateChanged.connect(self._on_change)
+        self.portfolio_widget.set_on_change(self._on_change)
 
     def get_parameters(self) -> InvestmentParams:
         """Create a new InvestmentParams instance with current UI control values."""
@@ -261,6 +348,7 @@ class InvestmentControlPanel(QWidget):
         params.new_savings = self.new_savings_slider.value() / 100  # Scale down from cents to dollars
         params.stock_code = self.stock_code_combo.currentText()
         params.adptive_withdraw_rate = self.adptive_withdraw_rate_checkbox.isChecked()
+        params.portfolio_data = self.portfolio_widget.get_portfolio_data()
         return params
 
     def reset(self):
@@ -388,7 +476,7 @@ class InvestmentPlotPanel(QWidget):
         # Plot 4: Annual Interest
         self.plot_interest_total.plot(years, years_result.series('interest_total'), pen=pg.mkPen(color='purple', width=2), 
                                symbol='t', symbolSize=4, symbolBrush='purple')
-        
+
         # Plot 5: Annual Withdrawals
         withdraw_data = years_result.series('withdraw', lambda v: round(v, 2))
         self.plot_withdraw.plot(years, withdraw_data, 
@@ -444,7 +532,7 @@ class InvestmentSimulatorGui(QMainWindow):
         
         # Create control and plot panels
         self.plot_panel = InvestmentPlotPanel()
-        self.control_panel = InvestmentControlPanel(self.plot_panel, on_parameter_change=self.update)
+        self.control_panel = InvestmentControlPanel(self.plot_panel, on_parameter_change=self.update, initial_params=self.params)
         
         main_layout.addWidget(self.control_panel)
         main_layout.addWidget(self.plot_panel)
