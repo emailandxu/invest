@@ -30,7 +30,9 @@ class PortfolioAllocationWidget(QWidget):
 
     def _build_ui(self):
         layout = QGridLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setHorizontalSpacing(10)
+        layout.setVerticalSpacing(12)
         layout.addWidget(self.header_label, 0, 0, 1, 3)
 
         for idx, (code, ratio) in enumerate(self.initial_values.items(), start=1):
@@ -97,6 +99,13 @@ class PortfolioAllocationWidget(QWidget):
         if total > 0:
             return {code: value / total for code, value in raw.items()}
         return {code: 0.0 for code in raw}
+    
+    def show_portfolio_window(self):
+        """Show the portfolio allocation controls in a separate window."""
+        self.setWindowTitle("Portfolio Allocation")
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
 
 class InvestmentControlPanel(QWidget):
@@ -219,6 +228,10 @@ class InvestmentControlPanel(QWidget):
         # reset_button.setFixedWidth((CONTROL_PANEL_WIDTH-15)//2)
         reset_button.clicked.connect(self.reset)
         button_layout.addWidget(reset_button)
+
+        self.portfolio_button = QPushButton("Portfolio")
+        self.portfolio_button.clicked.connect(self.portfolio_widget.show_portfolio_window)
+        button_layout.addWidget(self.portfolio_button)
         
         refresh_button = QPushButton("Refresh")
         # refresh_button.setFixedWidth((CONTROL_PANEL_WIDTH-15)//2)
@@ -262,7 +275,6 @@ class InvestmentControlPanel(QWidget):
         self.show_benchmark_checkbox.stateChanged.connect(self._on_ui_control_change)
         real_data_layout.addWidget(self.show_benchmark_checkbox, 4, 0)
         layout.addWidget(real_data_widget)
-        layout.addWidget(self.portfolio_widget)
 
     def _on_change(self):
         """Internal callback that updates labels and triggers external callback."""
