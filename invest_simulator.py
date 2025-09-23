@@ -141,6 +141,8 @@ class InvestmentYearsResult:
 
         return {
             'final_total': final_total,
+	        'final_ratio': (final_total-final_withdraw_total) / principle,
+            'final_ratio_inflation': (final_total-final_withdraw_total) / (self.get_benchmark_total()[-1]),
             'final_withdraw_total': final_withdraw_total,
             'final_interest_total': final_interest_total,
             'zero_year': zero_year,
@@ -178,9 +180,11 @@ class InvestmentYearsResult:
         metrics = self.financial_stats
         text = "💰 FINANCIAL SUMMARY:\n"
         text += f"  • CGAR:  {metrics['growth_rate']:>12.2%}\n"
-        text += f"  • Final0:         {metrics['final_total']:>12,.2f}$\n"
-        text += f"  • Final1:         {metrics['final_total']-metrics['final_withdraw_total']:>12,.2f}$\n"
+        text += f"  • All:         {metrics['final_total']:>12,.2f}$\n"
+        text += f"  • Final:         {metrics['final_total']-metrics['final_withdraw_total']:>12,.2f}$\n"
         text += f"  • Total Min: {metrics['total_min']:>12,.2f}$\n"
+        text += f"  • Final Ratio:  {metrics['final_ratio']:>12.2%}\n"
+        text += f"  • Final Ratio (Inf.):  {metrics['final_ratio_inflation']:>12.2%}\n"
         text += f"  • Withdraw Total: {metrics['final_withdraw_total']:>12,.2f}$\n"
         text += f"  • Interest Total: {metrics['final_interest_total']:>12,.2f}$\n"
         text += f"  • Final Principle: {self.years_result[-1]['principle']:>12,.2f}$\n"
