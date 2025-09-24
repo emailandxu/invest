@@ -1,0 +1,15 @@
+[project]
+name = "invest"
+version = "0.1.0"
+description = "Investment simulator and GUI tools"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "pyqt5>=5.15",
+    "pyqtgraph>=0.13",
+    "yfinance>=0.2",
+]
+
+[tool.uv]
+package = false
