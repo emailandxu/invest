@@ -300,20 +300,6 @@ class InvestmentControlPanel(QWidget):
 
     def set_parameters(self, params: InvestmentParams):
         """Set all sliders and checkboxes from parameter object."""
-        self.start_year_slider.valueChanged.disconnect()
-        self.duration_slider.valueChanged.disconnect()
-        self.retire_offset_slider.valueChanged.disconnect()
-        self.start_total_slider.valueChanged.disconnect()
-        self.cost_slider.valueChanged.disconnect()
-        self.cpi_slider.valueChanged.disconnect()
-        self.interest_rate_slider.valueChanged.disconnect()
-        self.new_savings_slider.valueChanged.disconnect()
-        self.stock_code_combo.currentTextChanged.disconnect()
-        self.use_portfolio_checkbox.stateChanged.disconnect()
-        self.use_real_interest_checkbox.stateChanged.disconnect()
-        self.use_real_cpi_checkbox.stateChanged.disconnect()
-        self.adptive_withdraw_rate_checkbox.stateChanged.disconnect()
-        self.portfolio_widget.set_on_change(None)
 
         self.start_year_slider.setValue(params.start_year)
         self.duration_slider.setValue(params.duration)
@@ -330,19 +316,6 @@ class InvestmentControlPanel(QWidget):
         self.adptive_withdraw_rate_checkbox.setChecked(params.adptive_withdraw_rate)
         self.portfolio_widget.set_values(params.portfolio_data)
 
-        self.start_year_slider.valueChanged.connect(self._on_change)
-        self.duration_slider.valueChanged.connect(self._on_change)
-        self.retire_offset_slider.valueChanged.connect(self._on_change)
-        self.start_total_slider.valueChanged.connect(self._on_change)
-        self.cost_slider.valueChanged.connect(self._on_change)
-        self.cpi_slider.valueChanged.connect(self._on_change)
-        self.interest_rate_slider.valueChanged.connect(self._on_change)
-        self.new_savings_slider.valueChanged.connect(self._on_change)
-        self.stock_code_combo.currentTextChanged.connect(self._on_change)
-        self.use_real_interest_checkbox.stateChanged.connect(self._on_change)
-        self.use_real_cpi_checkbox.stateChanged.connect(self._on_change)
-        self.adptive_withdraw_rate_checkbox.stateChanged.connect(self._on_change)
-        self.portfolio_widget.set_on_change(self._on_change)
 
     def get_parameters(self) -> InvestmentParams:
         """Create a new InvestmentParams instance with current UI control values."""

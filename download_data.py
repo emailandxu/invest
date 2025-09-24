@@ -1,12 +1,24 @@
 # save_vbtlx.py
 import yfinance as yf
 import datetime
+import argparse
 
-# 设置时间区间（例：从 2000-01-01 到 今天）
-start = "1970-01-01"
-end = datetime.date.today().isoformat()
+# 创建 ArgumentParser 对象
+parser = argparse.ArgumentParser(description="Download stock data from Yahoo Finance and save to CSV.")
 
-CODE = "GLD"
+# 添加参数
+parser.add_argument("CODE", help="Stock code to download (e.g., VTSAX)")
+parser.add_argument("--start", default="1970-01-01", help="Start date (YYYY-MM-DD)")
+parser.add_argument("--end", default=datetime.date.today().isoformat(), help="End date (YYYY-MM-DD)")
+
+# 解析命令行参数
+args = parser.parse_args()
+
+# 使用命令行参数
+CODE = args.CODE
+start = args.start
+end = args.end
+
 # 下载 VBTLX 的历史日线数据
 df = yf.download(CODE, start=start, end=end, progress=False)
 # df.loc[:, ('Close','BND')]
@@ -16,6 +28,9 @@ the_df.columns = ['Value']
 the_df.index.name = 'Date'
 
 # 保存为 CSV
+out ="data/STOCK/{}.csv".format(CODE)
+the_df.to_csv(out)
+print(f"Saved {len(the_df)} rows to {out}")
 out ="data/STOCK/{}.csv".format(CODE)
 the_df.to_csv(out)
 print(f"Saved {len(the_df)} rows to {out}")
