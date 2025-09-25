@@ -205,16 +205,16 @@ class InvestmentControlPanel(QWidget):
         row += 1
 
         # Stock Code Selection
-        self.stock_code_combo = QComboBox()
-        # self.stock_code_combo.addItems(["portfolio", "COKE", "BRKB"])
-        stock_codes = [path.split(".")[0].strip() for path in os.listdir("data/STOCK") if path.endswith(".csv")]
-        stock_codes = ["portfolio"] + [c for c in stock_codes if c]
-        self.stock_code_combo.addItems(stock_codes)
-        self.stock_code_combo.currentTextChanged.connect(self._on_change)
-        self.stock_code_label = QLabel("Stock Code:")
+        self.asset_code_combo = QComboBox()
+        # self.asset_code_combo.addItems(["portfolio", "COKE", "BRKB"])
+        asset_codes = [path.split(".")[0].strip() for path in os.listdir("data/STOCK") if path.endswith(".csv")]
+        asset_codes = ["portfolio"] + [c for c in asset_codes if c]
+        self.asset_code_combo.addItems(asset_codes)
+        self.asset_code_combo.currentTextChanged.connect(self._on_change)
+        self.asset_code_label = QLabel("Asset Code:")
         row += 1
-        grid_layout.addWidget(self.stock_code_label, row, 0)
-        grid_layout.addWidget(self.stock_code_combo, row, 1)
+        grid_layout.addWidget(self.asset_code_label, row, 0)
+        grid_layout.addWidget(self.asset_code_combo, row, 1)
         row += 1
 
         layout.addWidget(grid_widget)
@@ -255,13 +255,17 @@ class InvestmentControlPanel(QWidget):
         # Real Data checkboxes
         real_data_widget = QWidget()
         real_data_layout = QGridLayout(real_data_widget)
-        self.use_portfolio_checkbox = QCheckBox(text="Portfolio")
-        self.use_portfolio_checkbox.stateChanged.connect(self._on_change)
-        real_data_layout.addWidget(self.use_portfolio_checkbox, 0, 0)
-                    
-        self.use_real_interest_checkbox = QCheckBox(text="Federal Funds Rate")
-        self.use_real_interest_checkbox.stateChanged.connect(self._on_change)
-        real_data_layout.addWidget(self.use_real_interest_checkbox, 1, 0)
+
+        # Replace two checkboxes with a dropdown for data source selection
+        self.data_source_combo = QComboBox()
+        self.data_source_combo.addItems([
+            "Manual (Sliders)",
+            "Asset",
+            "Interest Rate",
+        ])
+        self.data_source_combo.currentIndexChanged.connect(self._on_change)
+        real_data_layout.addWidget(QLabel("Data Source:"), 0, 0)
+        real_data_layout.addWidget(self.data_source_combo, 1, 0)
         
         self.use_real_cpi_checkbox = QCheckBox(text="American CPI")
         self.use_real_cpi_checkbox.stateChanged.connect(self._on_change)
@@ -309,10 +313,13 @@ class InvestmentControlPanel(QWidget):
         self.cpi_slider.setValue(int(params.cpi * 10000))
         self.interest_rate_slider.setValue(int(params.interest_rate * 10000))
         self.new_savings_slider.setValue(int(params.new_savings * 100))
-        self.use_portfolio_checkbox.setChecked(params.use_portfolio)
-        self.use_real_interest_checkbox.setChecked(params.use_real_interest)
+        self.data_source_combo.setCurrentText(
+            "Asset" if params.use_asset else (
+            "Interest Rate" if params.use_real_interest else "Manual (Sliders)"
+            )
+        )
         self.use_real_cpi_checkbox.setChecked(params.use_real_cpi)
-        self.stock_code_combo.setCurrentText(params.stock_code)
+        self.asset_code_combo.setCurrentText(params.asset_code)
         self.adptive_withdraw_rate_checkbox.setChecked(params.adptive_withdraw_rate)
         self.portfolio_widget.set_values(params.portfolio_data)
 
@@ -327,11 +334,11 @@ class InvestmentControlPanel(QWidget):
         params.cost = self.cost_slider.value() / 100  # Scale down from cents to dollars
         params.cpi = self.cpi_slider.value() / 10000  # Scale down for percentage precision
         params.interest_rate = self.interest_rate_slider.value() / 10000  # Scale down for percentage precision
-        params.use_portfolio = self.use_portfolio_checkbox.isChecked()
-        params.use_real_interest = self.use_real_interest_checkbox.isChecked()
+        params.use_asset = self.data_source_combo.currentText() == "Asset"
+        params.use_real_interest = self.data_source_combo.currentText() == "Interest Rate"
         params.use_real_cpi = self.use_real_cpi_checkbox.isChecked()
         params.new_savings = self.new_savings_slider.value() / 100  # Scale down from cents to dollars
-        params.stock_code = self.stock_code_combo.currentText()
+        params.asset_code = self.asset_code_combo.currentText()
         params.adptive_withdraw_rate = self.adptive_withdraw_rate_checkbox.isChecked()
         params.portfolio_data = self.portfolio_widget.get_portfolio_data()
         return params

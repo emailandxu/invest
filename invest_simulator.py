@@ -15,9 +15,9 @@ class InvestmentParams:
     cpi: float = 0.00
     interest_rate: float = 0.00
     new_savings: float = USD(3.0)
-    stock_code: str = "portfolio"
+    asset_code: str = "portfolio"
     portfolio_data: Dict[str, float] = field(default_factory=portfolio_data) 
-    use_portfolio: bool = True
+    use_asset: bool = True
     use_real_interest: bool = True
     use_real_cpi: bool = True
     adptive_withdraw_rate: bool = True
@@ -32,11 +32,11 @@ class InvestmentParams:
             self.cost,
             self.cpi,
             self.interest_rate,
-            self.use_portfolio,
+            self.use_asset,
             self.use_real_interest,
             self.use_real_cpi,
             self.new_savings,
-            self.stock_code,
+            self.asset_code,
             self.adptive_withdraw_rate
         ))
     
@@ -54,17 +54,24 @@ class InvestmentParams:
     def get_defaults(cls) -> 'InvestmentParams':
         """Create an instance with default values."""
         return cls()
-    
-    def portfolio_interest_rate(self, year):
-        """Get interest rate for a given year based on parameters."""
-        if self.stock_code == "portfolio":
-            return sum([ratio * get_change_rate_by_year(stock_data(code), year, default=self.interest_rate) for (code, ratio) in self.portfolio_data.items()])
-        else:
-            return get_change_rate_by_year(stock_data(self.stock_code), year, default=self.interest_rate)
 
-    def real_interest_rate(self, year):
+    def interest_rate_fn(self, year):
         """Get interest rate for a given year based on parameters."""
-        return get_value_by_year(interest_data(), year, default=self.interest_rate)
+        if self.use_asset:
+            if self.asset_code == "portfolio":
+                weighted_interest = [
+                    ratio * get_change_rate_by_year(stock_data(code), year, default=self.interest_rate)
+                    if code != "CASH" else ratio * get_value_by_year(interest_data(), year, default=self.interest_rate)
+                    for (code, ratio) in self.portfolio_data.items()
+                ]
+
+                return sum(weighted_interest)
+            else:
+                return get_change_rate_by_year(stock_data(self.asset_code), year, default=self.interest_rate)
+        elif self.use_real_interest:
+            return get_value_by_year(interest_data(), year, default=self.interest_rate)
+        else:
+            return self.interest_rate
     
     def get_real_inflation_rate_multiplier(self, year):
         return inflation_rate_multiplier(year, self.start_year, default=self.cpi)
@@ -261,12 +268,7 @@ class StrategyBasic(InvestmentParams):
             return 0
 
     def get_interest_rate(self, year, total):
-        if self.use_portfolio:
-            return self.portfolio_interest_rate(year)
-        elif self.use_real_interest:
-            return self.real_interest_rate(year)
-        else:
-            return self.interest_rate
+        return self.interest_rate_fn(year)
     
     def get_withdraw_rate(self, year, total):
         """Get withdrawal rate for a given year and total."""
