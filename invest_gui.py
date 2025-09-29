@@ -512,7 +512,7 @@ class InvestmentSimulatorGui(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Investment Simulator")
-        self.setGeometry(100, 100, 900, 600)
+        self.setGeometry(100, 100, 900, 900)
         
         # Initialize with default parameters
         self.params = InvestmentParams.get_defaults()

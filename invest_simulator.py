@@ -175,8 +175,16 @@ class InvestmentYearsResult:
             return {}
         
         interest_rates = np.array([row['interest_rate'] for row in self.years_result])
+        market_interest_rates = np.array(self.get_benchmark_roi())
         
+        # the solution of OLS
+        cov = np.cov(interest_rates, market_interest_rates)
+        beta = cov[0, 1] / cov[1, 1]
+        alpha = interest_rates.mean() - beta * market_interest_rates.mean()
+
         return {
+            'alpha': alpha,
+            'beta': beta,
             'mean_rate': np.mean(interest_rates),
             'std_rate': np.std(interest_rates),
             'min_rate': np.min(interest_rates),
@@ -209,6 +217,8 @@ class InvestmentYearsResult:
         """Format interest rate statistics section of results."""
         stats = self.interest_rate_stats
         text = "📊 INTEREST RATE STATS:\n"
+        text += f"  • Beta:           {stats['beta']:>12.3}\n"
+        text += f"  • Alpha:           {stats['alpha']:>12.3}\n"
         text += f"  • Mean Rate:           {stats['mean_rate']:>12.3%}\n"
         text += f"  • Standard Deviation:  {stats['std_rate']:>12.3%}\n"
         text += f"  • Min Rate:            {stats['min_rate']:>12.3%}\n"
