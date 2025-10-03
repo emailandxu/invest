@@ -267,10 +267,6 @@ class InvestmentControlPanel(QWidget):
         real_data_layout.addWidget(QLabel("Data Source:"), 0, 0)
         real_data_layout.addWidget(self.data_source_combo, 1, 0)
         
-        self.use_real_cpi_checkbox = QCheckBox(text="American CPI")
-        self.use_real_cpi_checkbox.stateChanged.connect(self._on_change)
-        real_data_layout.addWidget(self.use_real_cpi_checkbox, 2, 0)
-        
         self.adptive_withdraw_rate_checkbox = QCheckBox(text="Adaptive Withdraw")
         self.adptive_withdraw_rate_checkbox.stateChanged.connect(self._on_change)
         real_data_layout.addWidget(self.adptive_withdraw_rate_checkbox, 3, 0)
@@ -318,7 +314,6 @@ class InvestmentControlPanel(QWidget):
             "Interest Rate" if params.use_real_interest else "Manual (Sliders)"
             )
         )
-        self.use_real_cpi_checkbox.setChecked(params.use_real_cpi)
         self.asset_code_combo.setCurrentText(params.asset_code)
         self.adptive_withdraw_rate_checkbox.setChecked(params.adptive_withdraw_rate)
         self.portfolio_widget.set_values(params.portfolio_data)
@@ -336,7 +331,7 @@ class InvestmentControlPanel(QWidget):
         params.interest_rate = self.interest_rate_slider.value() / 10000  # Scale down for percentage precision
         params.use_asset = self.data_source_combo.currentText() == "Asset"
         params.use_real_interest = self.data_source_combo.currentText() == "Interest Rate"
-        params.use_real_cpi = self.use_real_cpi_checkbox.isChecked()
+        params.use_real_cpi = self.data_source_combo.currentText() != "Manual (Sliders)"
         params.new_savings = self.new_savings_slider.value() / 100  # Scale down from cents to dollars
         params.asset_code = self.asset_code_combo.currentText()
         params.adptive_withdraw_rate = self.adptive_withdraw_rate_checkbox.isChecked()
@@ -481,9 +476,14 @@ class InvestmentPlotPanel(QWidget):
             self.plot_withdraw.plot(years, benchmark_withdrawals, 
                                 pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
                                 name='Target Cost')
+            self.plot_withdraw.setYRange(0, max(max(withdraw_data)*1.5, max(benchmark_withdrawals)*1.5))
+
             # Add text labels showing exact values on each point
             for i, (year, value) in enumerate(zip(years, withdraw_data)):
-                text_item = pg.TextItem(f'{(value+1e-16)/(benchmark_withdrawals[i]+1e-16) * years_result.params.cost / 12:.2f}', anchor=(0.5, 1.2), color='yellow')
+                monthly_withdraw_inflation = (value+1e-16)/(benchmark_withdrawals[i]+1e-16) * years_result.params.cost / 12
+                monthly_withdraw_text = f'{monthly_withdraw_inflation*100:.0f}'
+                # monthly_withdraw_text += "\n\n" + f"{value / 12 * 100:.0f}"
+                text_item = pg.TextItem(monthly_withdraw_text, anchor=(0.5, 1.2), color='yellow')
                 font = text_item.textItem.font()
                 font.setPointSize(6)
                 text_item.textItem.setFont(font)

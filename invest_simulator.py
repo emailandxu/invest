@@ -20,7 +20,7 @@ class InvestmentParams:
     use_asset: bool = True
     use_real_interest: bool = True
     use_real_cpi: bool = True
-    adptive_withdraw_rate: bool = True
+    adptive_withdraw_rate: bool = False
 
     def __hash__(self):
         """Return hash of the investment parameters for caching purposes."""
@@ -104,12 +104,16 @@ class InvestmentYearsResult:
         return benchmark_total
     
     def get_benchmark_roi(self):
-        benchmark_roi = [get_change_rate_by_year(stock_data("SP500"), year, default=self.params.interest_rate) for year in self.series('year')]
+        benchmark_roi = [get_change_rate_by_year(stock_data("SPY"), year, default=self.params.interest_rate) for year in self.series('year')]
         return benchmark_roi
 
     def get_benchmark_withdraw(self):
-        benchmark_withdrawals = [self.params.cost * self.params.get_real_inflation_rate_multiplier(year) for year in self.series('year')]
+        benchmark_withdrawals = [self.params.cost * self.params.get_inflation_rate_multiplier(year) for year in self.series('year')]
         return benchmark_withdrawals
+    
+    def get_risk_free_roi(self):
+        risk_free_roi = [get_value_by_year(interest_data(), year, default=self.params.interest_rate) for year in self.series('year')]
+        return risk_free_roi
 
     @property
     def financial_stats(self):
@@ -182,9 +186,13 @@ class InvestmentYearsResult:
         beta = cov[0, 1] / cov[1, 1]
         alpha = interest_rates.mean() - beta * market_interest_rates.mean()
 
+        interest_risk_free = self.get_risk_free_roi()
+        sharp_ratio = np.mean(interest_rates - interest_risk_free) / (np.std(interest_rates - interest_risk_free) + 1e-16)
+
         return {
             'alpha': alpha,
             'beta': beta,
+            'sharp_ratio': sharp_ratio,
             'mean_rate': np.mean(interest_rates),
             'std_rate': np.std(interest_rates),
             'min_rate': np.min(interest_rates),
@@ -218,7 +226,8 @@ class InvestmentYearsResult:
         stats = self.interest_rate_stats
         text = "📊 INTEREST RATE STATS:\n"
         text += f"  • Beta:           {stats['beta']:>12.3}\n"
-        text += f"  • Alpha:           {stats['alpha']:>12.3}\n"
+        text += f"  • Alpha:           {stats['alpha']:>12.3%}\n"
+        text += f"  • Sharpe ratio:      {stats['sharp_ratio']:>12.3}\n"
         text += f"  • Mean Rate:           {stats['mean_rate']:>12.3%}\n"
         text += f"  • Standard Deviation:  {stats['std_rate']:>12.3%}\n"
         text += f"  • Min Rate:            {stats['min_rate']:>12.3%}\n"
