@@ -14,6 +14,35 @@ from invest_simulator import InvestmentParams, StrategyBasic, InvestmentYearsRes
 from read_data import get_change_rate_by_year, get_value_by_year, stock_data, portfolio_data, interest_data, inflation_data, inflation_rate_multiplier
 from utils import USD
 
+def get_strategy(params:InvestmentParams):
+    strategy = StrategyBasic.from_params(params)
+    return strategy
+
+def get_compare_results(params:InvestmentParams, compare_code: str):
+    """Run a comparison simulation and overlay its curves without clearing existing overlays."""
+    if not compare_code or compare_code == "None":
+        return
+    # Build parameters for comparison based on current params
+    base = params
+    compare_params = InvestmentParams(
+        start_year=base.start_year,
+        duration=base.duration,
+        retire_offset=base.retire_offset,
+        start_total=base.start_total,
+        cost=base.cost,
+        cpi=base.cpi,
+        interest_rate=base.interest_rate,
+        new_savings=base.new_savings,
+        asset_code=compare_code,
+        portfolio_data=base.portfolio_data,
+        use_asset=True,  # ensure we use asset data for comparison
+        use_real_interest=base.use_real_interest,
+        use_real_cpi=base.use_real_cpi,
+        adptive_withdraw_rate=base.adptive_withdraw_rate,
+    )
+    compare_years_result = get_strategy(compare_params)()
+    return compare_years_result
+
 
 class PortfolioAllocationWidget(QWidget):
     def __init__(self, params:InvestmentParams=None, on_change=None):
@@ -111,11 +140,10 @@ class PortfolioAllocationWidget(QWidget):
 class InvestmentControlPanel(QWidget):
     """Control panel widget containing all parameter sliders and checkboxes."""
     
-    def __init__(self, plot_panel, on_parameter_change=None, initial_params=None, on_compare=None):
+    def __init__(self, plot_panel, on_parameter_change=None, initial_params=None):
         super().__init__()
         self.plot_panel = plot_panel
         self.on_parameter_change = on_parameter_change
-        self.on_compare = on_compare
         self.portfolio_widget = PortfolioAllocationWidget(initial_params, on_change=self._on_change)
         self.setup_ui()
     
@@ -205,17 +233,20 @@ class InvestmentControlPanel(QWidget):
         grid_layout.addWidget(self.new_savings_label, row, 1)
         row += 1
 
-        # Stock Code Selection
-        self.asset_code_combo = QComboBox()
         # self.asset_code_combo.addItems(["portfolio", "COKE", "BRKB"])
         asset_codes = [path.split(".")[0].strip() for path in os.listdir("data/STOCK") if path.endswith(".csv")]
         asset_codes = ["portfolio"] + [c for c in asset_codes if c]
+        
+        # Stock Code Selection
+        asset_widget = QWidget()
+        asset_layout = QHBoxLayout(asset_widget)
+        asset_layout.setContentsMargins(0, 0, 0, 0)
+        self.asset_code_combo = QComboBox()
         self.asset_code_combo.addItems(asset_codes)
         self.asset_code_combo.currentTextChanged.connect(self._on_change)
-        self.asset_code_label = QLabel("Asset Code:")
-        row += 1
-        grid_layout.addWidget(self.asset_code_label, row, 0)
-        grid_layout.addWidget(self.asset_code_combo, row, 1)
+        asset_layout.addWidget(QLabel("Red (main):"))
+        asset_layout.addWidget(self.asset_code_combo)
+        grid_layout.addWidget(asset_widget, row, 0, 1, 2)
         row += 1
 
         # Compare Code dropdown and button (default None)
@@ -224,14 +255,24 @@ class InvestmentControlPanel(QWidget):
         compare_layout.setContentsMargins(0, 0, 0, 0)
         self.compare_code_combo = QComboBox()
         self.compare_code_combo.addItems(["None"] + asset_codes)
-        self.compare_button = QPushButton("Add Compare")
-        # trigger compare action without changing current parameters automatically
-        self.compare_button.clicked.connect(self._on_compare_clicked)
-        compare_layout.addWidget(QLabel("Compare Code:"))
+        self.compare_code_combo.currentTextChanged.connect(self._on_change)
+        compare_layout.addWidget(QLabel("Yellow:"))
         compare_layout.addWidget(self.compare_code_combo)
-        compare_layout.addWidget(self.compare_button)
         grid_layout.addWidget(compare_widget, row, 0, 1, 2)
         row += 1
+
+        # Compare Code B dropdown and button (default None)
+        compare_widget_b = QWidget()
+        compare_layout_b = QHBoxLayout(compare_widget_b)
+        compare_layout_b.setContentsMargins(0, 0, 0, 0)
+        self.compare_code_combo_b = QComboBox()
+        self.compare_code_combo_b.addItems(["None"] + asset_codes)
+        self.compare_code_combo_b.currentTextChanged.connect(self._on_change)
+        compare_layout_b.addWidget(QLabel("Green:"))
+        compare_layout_b.addWidget(self.compare_code_combo_b)
+        grid_layout.addWidget(compare_widget_b, row, 0, 1, 2)
+        row += 1
+        
 
         layout.addWidget(grid_widget)
 
@@ -298,11 +339,6 @@ class InvestmentControlPanel(QWidget):
         if self.on_parameter_change:
             self.on_parameter_change()
 
-    def _on_compare_clicked(self):
-        """Handle compare button click to overlay comparison curves."""
-        if self.on_compare:
-            self.on_compare(self.compare_code_combo.currentText())
-
     def _on_ui_control_change(self):
         self.plot_panel.show_benchmark = self.show_benchmark_checkbox.isChecked()
         self.plot_panel.update()
@@ -339,6 +375,8 @@ class InvestmentControlPanel(QWidget):
         self.adptive_withdraw_rate_checkbox.setChecked(params.adptive_withdraw_rate)
         self.portfolio_widget.set_values(params.portfolio_data)
 
+        self.compare_code_combo.setCurrentText(params.compare_code[0])
+        self.compare_code_combo_b.setCurrentText(params.compare_code[1])
 
     def get_parameters(self) -> InvestmentParams:
         """Create a new InvestmentParams instance with current UI control values."""
@@ -357,6 +395,8 @@ class InvestmentControlPanel(QWidget):
         params.asset_code = self.asset_code_combo.currentText()
         params.adptive_withdraw_rate = self.adptive_withdraw_rate_checkbox.isChecked()
         params.portfolio_data = self.portfolio_widget.get_portfolio_data()
+        params.compare_code = [self.compare_code_combo.currentText(), self.compare_code_combo_b.currentText()]
+
         return params
 
     def reset(self):
@@ -379,7 +419,6 @@ class InvestmentPlotPanel(QWidget):
         self.setup_ui()
         self.show_benchmark = show_benchmark
         # sequence index for compare overlays to vary color/styles
-        self.compare_seq = 0
 
     def setup_ui(self):
         layout = QGridLayout(self)
@@ -444,159 +483,119 @@ class InvestmentPlotPanel(QWidget):
         self.plot_interest_total.clear()
         self.plot_withdraw.clear()
         self.plot_ratio.clear()
-    
+
     def update(self, years_result: InvestmentYearsResult=None):
-        """Update all plots with simulation results."""
+        """Update all plots with new simulation results."""
         if years_result is not None:
             self.years_result = years_result
         elif self.years_result is not None:
             years_result = self.years_result
         else:
             raise ValueError("years_result is required")
-
-        self.clear_all_plots()
-        # reset compare styles since base plots are cleared
-        self.compare_seq = 0
         
+        
+        self.clear_all_plots()
+
+        self.draw_all_plots(years_result, color="red")
+        
+        compare_code, compare_code_b = years_result.params.compare_code
+
+        if compare_code and compare_code != "None":
+            compare_years_result = get_compare_results(self.years_result.params, compare_code)
+            self.draw_all_plots(compare_years_result, color="yellow")
+        
+        if compare_code_b and compare_code_b != "None":
+            compare_years_result_b = get_compare_results(self.years_result.params, compare_code_b)
+            self.draw_all_plots(compare_years_result_b, color="green")
+        
+        if self.show_benchmark and years_result is not None:
+            self.draw_benchmark_plots(years_result)
+        
+        
+    def draw_benchmark_plots(self, years_result: InvestmentYearsResult):
+        years = years_result.series('year')
+        self.plot_total.plot(years, years_result.get_benchmark_total(), 
+                            pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
+                            name='Inflation Adjusted Start Total')
+
+
+        # Add benchmark line for real interest rate
+        self.plot_interest_rate.plot(years, years_result.get_benchmark_roi(), 
+                                    pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
+                                    name='Real Interest Rate')
+
+        # 2: benchmark Withdraw with monthly withraw
+        withdraw_data = years_result.series('withdraw', lambda v: round(v, 2))
+        benchmark_withdrawals = years_result.get_benchmark_withdraw()
+        # Add benchmark line for withdrawal plot
+        self.plot_withdraw.plot(years, benchmark_withdrawals, 
+                            pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
+                            name='Target Cost')
+        self.plot_withdraw.setYRange(0, max(max(withdraw_data)*1.5, max(benchmark_withdrawals)*1.5))
+
+
+        # Add text labels showing exact values on each point
+        for i, (year, value) in enumerate(zip(years, withdraw_data)):
+            monthly_withdraw_inflation = (value+1e-16)/(benchmark_withdrawals[i]+1e-16) * years_result.params.cost / 12
+            monthly_withdraw_text = f'{monthly_withdraw_inflation*100:.0f}'
+            # monthly_withdraw_text += "\n\n" + f"{value / 12 * 100:.0f}"
+            text_item = pg.TextItem(monthly_withdraw_text, anchor=(0.5, 1.2), color='white')
+            font = text_item.textItem.font()
+            font.setPointSize(6)
+            text_item.textItem.setFont(font)
+            text_item.setPos(year, value)
+            self.plot_withdraw.addItem(text_item)
+
+
+        # 3: plot interest vs principle ratio benchmark
+        # Add benchmark line for interest vs principle plot
+        benchmark_ratio = [years_result.params.get_real_inflation_rate_multiplier(year) - 1.0 for year in years]  # Line at 1.0 representing break-even
+        self.plot_ratio.plot(years, benchmark_ratio, 
+                            pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
+                            name='Break-even')
+
+    def draw_all_plots(self, years_result: InvestmentYearsResult=None, color="blue"):
+        """Update all plots with simulation results."""
         # Helper function to extract series data
         years = years_result.series('year')
         # Plot 1: Total Amount
-        self.plot_total.plot(years, years_result.series('total'), pen=pg.mkPen(color='blue', width=2), 
-                            symbol='o', symbolSize=4, symbolBrush='blue')
+        self.plot_total.plot(years, years_result.series('total'), pen=pg.mkPen(color=color, width=2), 
+                            symbol='o', symbolSize=4, symbolBrush=color)
         
-        if self.show_benchmark:
-            self.plot_total.plot(years, years_result.get_benchmark_total(), 
-                                pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
-                                name='Inflation Adjusted Start Total')
-        
+
         # Plot 2: Interest Rate
         self.plot_interest_rate.plot(years, years_result.series('interest_rate', lambda v: round(v, 4)), 
-                                    pen=pg.mkPen(color='green', width=2), 
-                                    symbol='s', symbolSize=4, symbolBrush='green')
+                                    pen=pg.mkPen(color=color, width=2), 
+                                    symbol='s', symbolSize=4, symbolBrush=color)
         
-        if self.show_benchmark:
-            # Add benchmark line for real interest rate
-            self.plot_interest_rate.plot(years, years_result.get_benchmark_roi(), 
-                                        pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
-                                        name='Real Interest Rate')
-        
+
         # Plot 3: Withdraw Rate
         self.plot_withdraw_rate.plot(years, years_result.series('withdraw_rate', lambda v: round(v, 4)), 
-                                              pen=pg.mkPen(color='orange', width=2), 
-                                              symbol='x', symbolSize=4, symbolBrush='orange')
+                                              pen=pg.mkPen(color=color, width=2), 
+                                              symbol='x', symbolSize=4, symbolBrush=color)
         
         # Plot 4: Annual Interest
-        self.plot_interest_total.plot(years, years_result.series('interest_total'), pen=pg.mkPen(color='purple', width=2), 
-                               symbol='t', symbolSize=4, symbolBrush='purple')
+        self.plot_interest_total.plot(years, years_result.series('interest_total'), pen=pg.mkPen(color=color, width=2), 
+                               symbol='t', symbolSize=4, symbolBrush=color)
 
         # Plot 5: Annual Withdrawals
-        withdraw_data = years_result.series('withdraw', lambda v: round(v, 2))
-        self.plot_withdraw.plot(years, withdraw_data, 
-                               pen=pg.mkPen(color='brown', width=2), 
-                               symbol='h', symbolSize=4, symbolBrush='brown')
+        self.plot_withdraw.plot(years, years_result.series('withdraw', lambda v: round(v, 2)), 
+                               pen=pg.mkPen(color=color, width=2), 
+                               symbol='h', symbolSize=4, symbolBrush=color)
         
-        if self.show_benchmark:
-            benchmark_withdrawals = years_result.get_benchmark_withdraw()
-            # Add benchmark line for withdrawal plot
-            self.plot_withdraw.plot(years, benchmark_withdrawals, 
-                                pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
-                                name='Target Cost')
-            self.plot_withdraw.setYRange(0, max(max(withdraw_data)*1.5, max(benchmark_withdrawals)*1.5))
 
-            # Add text labels showing exact values on each point
-            for i, (year, value) in enumerate(zip(years, withdraw_data)):
-                monthly_withdraw_inflation = (value+1e-16)/(benchmark_withdrawals[i]+1e-16) * years_result.params.cost / 12
-                monthly_withdraw_text = f'{monthly_withdraw_inflation*100:.0f}'
-                # monthly_withdraw_text += "\n\n" + f"{value / 12 * 100:.0f}"
-                text_item = pg.TextItem(monthly_withdraw_text, anchor=(0.5, 1.2), color='yellow')
-                font = text_item.textItem.font()
-                font.setPointSize(6)
-                text_item.textItem.setFont(font)
-                text_item.setPos(year, value)
-                self.plot_withdraw.addItem(text_item)
 
         # Plot 6: Interest VS Principle
         self.plot_ratio.plot(years, years_result.series('withdrawed_interest_vs_principle'), 
-                            pen=pg.mkPen(color='red', width=2), 
-                            symbol='d', symbolSize=4, symbolBrush='red')
+                            pen=pg.mkPen(color=color, width=2), 
+                            symbol='d', symbolSize=4, symbolBrush=color)
         
         # Also plot interest vs principle
-        self.plot_ratio.plot(years, years_result.series('interest_vs_principle'), 
-                            pen=pg.mkPen(color='blue', width=2), 
-                            symbol='o', symbolSize=4, symbolBrush='blue')
+        # self.plot_ratio.plot(years, years_result.series('interest_vs_principle'), 
+        #                     pen=pg.mkPen(color=color, width=2), 
+        #                     symbol='o', symbolSize=4, symbolBrush=color)
 
-        if self.show_benchmark:
-            # Add benchmark line for interest vs principle plot
-            benchmark_ratio = [years_result.params.get_real_inflation_rate_multiplier(year) - 1.0 for year in years]  # Line at 1.0 representing break-even
-            self.plot_ratio.plot(years, benchmark_ratio, 
-                                pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
-                                name='Break-even')
-
-    def _next_compare_style(self):
-        """Return a tuple (color1, color2, pen_style) cycling through distinct options."""
-        color_cycle = [
-            (0, 170, 255),   # cyan
-            (255, 85, 127),  # pink
-            (255, 170, 0),   # orange
-            (0, 200, 120),   # green
-            (170, 85, 255),  # purple
-            (255, 0, 0),     # red
-            (0, 114, 178),   # blue
-        ]
-        style_cycle = [Qt.DashLine, Qt.DotLine, Qt.DashDotLine, Qt.DashDotDotLine]
-        base = color_cycle[self.compare_seq % len(color_cycle)]
-        style = style_cycle[(self.compare_seq // len(color_cycle)) % len(style_cycle)]
-        darker = tuple(int(c * 0.6) for c in base)
-        self.compare_seq += 1
-        return base, darker, style
-
-    def plot_compare(self, years_result: InvestmentYearsResult, label: str=None):
-        """Overlay comparison curves without clearing existing plots."""
-        if years_result is None:
-            return
-        years = years_result.series('year')
-        code_label = label or years_result.params.asset_code
-
-        cmp1, cmp2, dashed = self._next_compare_style()
-        # Plot 1: Total Amount (magenta dashed)
-        self.plot_total.plot(years, years_result.series('total'),
-                             pen=pg.mkPen(color=cmp1, width=2, style=dashed),
-                             symbol=None,
-                             name=None)
-
-        # Plot 2: Interest Rate
-        self.plot_interest_rate.plot(years, years_result.series('interest_rate', lambda v: round(v, 4)),
-                                     pen=pg.mkPen(color=cmp1, width=2, style=dashed),
-                                     symbol=None,
-                                     name=None)
-
-        # Plot 3: Withdraw Rate
-        self.plot_withdraw_rate.plot(years, years_result.series('withdraw_rate', lambda v: round(v, 4)),
-                                     pen=pg.mkPen(color=cmp1, width=2, style=dashed),
-                                     symbol=None,
-                                     name=None)
-
-        # Plot 4: Annual Interest
-        self.plot_interest_total.plot(years, years_result.series('interest_total'),
-                                      pen=pg.mkPen(color=cmp1, width=2, style=dashed),
-                                      symbol=None,
-                                      name=None)
-
-        # Plot 5: Annual Withdrawals
-        self.plot_withdraw.plot(years, years_result.series('withdraw', lambda v: round(v, 2)),
-                                pen=pg.mkPen(color=cmp1, width=2, style=dashed),
-                                symbol=None,
-                                name=None)
-
-        # Plot 6: Interest VS Principle (two series)
-        self.plot_ratio.plot(years, years_result.series('withdrawed_interest_vs_principle'),
-                             pen=pg.mkPen(color=cmp1, width=2, style=dashed),
-                              symbol=None,
-                              name=None)
-        self.plot_ratio.plot(years, years_result.series('interest_vs_principle'),
-                             pen=pg.mkPen(color=cmp2, width=2, style=dashed),
-                              symbol=None,
-                              name=None)
+ 
 
 class InvestmentSimulatorGui(QMainWindow):
     
@@ -619,7 +618,6 @@ class InvestmentSimulatorGui(QMainWindow):
             self.plot_panel,
             on_parameter_change=self.update,
             initial_params=self.params,
-            on_compare=self.compare,
         )
         
         main_layout.addWidget(self.control_panel)
@@ -647,37 +645,8 @@ class InvestmentSimulatorGui(QMainWindow):
         
     def run_simulation(self, params: InvestmentParams):
         """Run the investment simulation with current parameters."""
-        strategy = StrategyBasic.from_params(params)
+        strategy = get_strategy(params)
         return strategy()
-    
-    def compare(self, compare_code: str):
-        """Run a comparison simulation and overlay its curves without clearing existing overlays."""
-        if not compare_code or compare_code == "None":
-            return
-        # Build parameters for comparison based on current params
-        base = self.params
-        compare_params = InvestmentParams(
-            start_year=base.start_year,
-            duration=base.duration,
-            retire_offset=base.retire_offset,
-            start_total=base.start_total,
-            cost=base.cost,
-            cpi=base.cpi,
-            interest_rate=base.interest_rate,
-            new_savings=base.new_savings,
-            asset_code=compare_code,
-            portfolio_data=base.portfolio_data,
-            use_asset=True,  # ensure we use asset data for comparison
-            use_real_interest=base.use_real_interest,
-            use_real_cpi=base.use_real_cpi,
-            adptive_withdraw_rate=base.adptive_withdraw_rate,
-        )
-        try:
-            compare_years_result = self.run_simulation(compare_params)
-            # Overlay on existing plots with a distinct style and legend label
-            self.plot_panel.plot_compare(compare_years_result, label=compare_code)
-        except Exception as e:
-            self.control_panel.update(f"Compare Error: {str(e)}")
     
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Left:

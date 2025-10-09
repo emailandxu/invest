@@ -16,6 +16,7 @@ class InvestmentParams:
     interest_rate: float = 0.00
     new_savings: float = USD(3.0)
     asset_code: str = "portfolio"
+    compare_code: str = field(default_factory=lambda: ["GOLD", "SP500"])
     portfolio_data: Dict[str, float] = field(default_factory=portfolio_data) 
     use_asset: bool = True
     use_real_interest: bool = True
@@ -37,6 +38,7 @@ class InvestmentParams:
             self.use_real_cpi,
             self.new_savings,
             self.asset_code,
+            self.compare_code,
             self.adptive_withdraw_rate
         ))
     
