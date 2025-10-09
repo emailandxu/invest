@@ -111,10 +111,11 @@ class PortfolioAllocationWidget(QWidget):
 class InvestmentControlPanel(QWidget):
     """Control panel widget containing all parameter sliders and checkboxes."""
     
-    def __init__(self, plot_panel, on_parameter_change=None, initial_params=None):
+    def __init__(self, plot_panel, on_parameter_change=None, initial_params=None, on_compare=None):
         super().__init__()
         self.plot_panel = plot_panel
         self.on_parameter_change = on_parameter_change
+        self.on_compare = on_compare
         self.portfolio_widget = PortfolioAllocationWidget(initial_params, on_change=self._on_change)
         self.setup_ui()
     
@@ -217,6 +218,21 @@ class InvestmentControlPanel(QWidget):
         grid_layout.addWidget(self.asset_code_combo, row, 1)
         row += 1
 
+        # Compare Code dropdown and button (default None)
+        compare_widget = QWidget()
+        compare_layout = QHBoxLayout(compare_widget)
+        compare_layout.setContentsMargins(0, 0, 0, 0)
+        self.compare_code_combo = QComboBox()
+        self.compare_code_combo.addItems(["None"] + asset_codes)
+        self.compare_button = QPushButton("Add Compare")
+        # trigger compare action without changing current parameters automatically
+        self.compare_button.clicked.connect(self._on_compare_clicked)
+        compare_layout.addWidget(QLabel("Compare Code:"))
+        compare_layout.addWidget(self.compare_code_combo)
+        compare_layout.addWidget(self.compare_button)
+        grid_layout.addWidget(compare_widget, row, 0, 1, 2)
+        row += 1
+
         layout.addWidget(grid_widget)
 
         # Reset and Refresh buttons
@@ -281,6 +297,11 @@ class InvestmentControlPanel(QWidget):
         self.update_labels()
         if self.on_parameter_change:
             self.on_parameter_change()
+
+    def _on_compare_clicked(self):
+        """Handle compare button click to overlay comparison curves."""
+        if self.on_compare:
+            self.on_compare(self.compare_code_combo.currentText())
 
     def _on_ui_control_change(self):
         self.plot_panel.show_benchmark = self.show_benchmark_checkbox.isChecked()
@@ -357,6 +378,8 @@ class InvestmentPlotPanel(QWidget):
         super().__init__()
         self.setup_ui()
         self.show_benchmark = show_benchmark
+        # sequence index for compare overlays to vary color/styles
+        self.compare_seq = 0
 
     def setup_ui(self):
         layout = QGridLayout(self)
@@ -432,6 +455,8 @@ class InvestmentPlotPanel(QWidget):
             raise ValueError("years_result is required")
 
         self.clear_all_plots()
+        # reset compare styles since base plots are cleared
+        self.compare_seq = 0
         
         # Helper function to extract series data
         years = years_result.series('year')
@@ -507,6 +532,72 @@ class InvestmentPlotPanel(QWidget):
                                 pen=pg.mkPen(color='gray', width=1, style=Qt.DashLine), 
                                 name='Break-even')
 
+    def _next_compare_style(self):
+        """Return a tuple (color1, color2, pen_style) cycling through distinct options."""
+        color_cycle = [
+            (0, 170, 255),   # cyan
+            (255, 85, 127),  # pink
+            (255, 170, 0),   # orange
+            (0, 200, 120),   # green
+            (170, 85, 255),  # purple
+            (255, 0, 0),     # red
+            (0, 114, 178),   # blue
+        ]
+        style_cycle = [Qt.DashLine, Qt.DotLine, Qt.DashDotLine, Qt.DashDotDotLine]
+        base = color_cycle[self.compare_seq % len(color_cycle)]
+        style = style_cycle[(self.compare_seq // len(color_cycle)) % len(style_cycle)]
+        darker = tuple(int(c * 0.6) for c in base)
+        self.compare_seq += 1
+        return base, darker, style
+
+    def plot_compare(self, years_result: InvestmentYearsResult, label: str=None):
+        """Overlay comparison curves without clearing existing plots."""
+        if years_result is None:
+            return
+        years = years_result.series('year')
+        code_label = label or years_result.params.asset_code
+
+        cmp1, cmp2, dashed = self._next_compare_style()
+        # Plot 1: Total Amount (magenta dashed)
+        self.plot_total.plot(years, years_result.series('total'),
+                             pen=pg.mkPen(color=cmp1, width=2, style=dashed),
+                             symbol=None,
+                             name=None)
+
+        # Plot 2: Interest Rate
+        self.plot_interest_rate.plot(years, years_result.series('interest_rate', lambda v: round(v, 4)),
+                                     pen=pg.mkPen(color=cmp1, width=2, style=dashed),
+                                     symbol=None,
+                                     name=None)
+
+        # Plot 3: Withdraw Rate
+        self.plot_withdraw_rate.plot(years, years_result.series('withdraw_rate', lambda v: round(v, 4)),
+                                     pen=pg.mkPen(color=cmp1, width=2, style=dashed),
+                                     symbol=None,
+                                     name=None)
+
+        # Plot 4: Annual Interest
+        self.plot_interest_total.plot(years, years_result.series('interest_total'),
+                                      pen=pg.mkPen(color=cmp1, width=2, style=dashed),
+                                      symbol=None,
+                                      name=None)
+
+        # Plot 5: Annual Withdrawals
+        self.plot_withdraw.plot(years, years_result.series('withdraw', lambda v: round(v, 2)),
+                                pen=pg.mkPen(color=cmp1, width=2, style=dashed),
+                                symbol=None,
+                                name=None)
+
+        # Plot 6: Interest VS Principle (two series)
+        self.plot_ratio.plot(years, years_result.series('withdrawed_interest_vs_principle'),
+                             pen=pg.mkPen(color=cmp1, width=2, style=dashed),
+                              symbol=None,
+                              name=None)
+        self.plot_ratio.plot(years, years_result.series('interest_vs_principle'),
+                             pen=pg.mkPen(color=cmp2, width=2, style=dashed),
+                              symbol=None,
+                              name=None)
+
 class InvestmentSimulatorGui(QMainWindow):
     
     def __init__(self):
@@ -524,7 +615,12 @@ class InvestmentSimulatorGui(QMainWindow):
         
         # Create control and plot panels
         self.plot_panel = InvestmentPlotPanel()
-        self.control_panel = InvestmentControlPanel(self.plot_panel, on_parameter_change=self.update, initial_params=self.params)
+        self.control_panel = InvestmentControlPanel(
+            self.plot_panel,
+            on_parameter_change=self.update,
+            initial_params=self.params,
+            on_compare=self.compare,
+        )
         
         main_layout.addWidget(self.control_panel)
         main_layout.addWidget(self.plot_panel)
@@ -553,6 +649,35 @@ class InvestmentSimulatorGui(QMainWindow):
         """Run the investment simulation with current parameters."""
         strategy = StrategyBasic.from_params(params)
         return strategy()
+    
+    def compare(self, compare_code: str):
+        """Run a comparison simulation and overlay its curves without clearing existing overlays."""
+        if not compare_code or compare_code == "None":
+            return
+        # Build parameters for comparison based on current params
+        base = self.params
+        compare_params = InvestmentParams(
+            start_year=base.start_year,
+            duration=base.duration,
+            retire_offset=base.retire_offset,
+            start_total=base.start_total,
+            cost=base.cost,
+            cpi=base.cpi,
+            interest_rate=base.interest_rate,
+            new_savings=base.new_savings,
+            asset_code=compare_code,
+            portfolio_data=base.portfolio_data,
+            use_asset=True,  # ensure we use asset data for comparison
+            use_real_interest=base.use_real_interest,
+            use_real_cpi=base.use_real_cpi,
+            adptive_withdraw_rate=base.adptive_withdraw_rate,
+        )
+        try:
+            compare_years_result = self.run_simulation(compare_params)
+            # Overlay on existing plots with a distinct style and legend label
+            self.plot_panel.plot_compare(compare_years_result, label=compare_code)
+        except Exception as e:
+            self.control_panel.update(f"Compare Error: {str(e)}")
     
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Left:

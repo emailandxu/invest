@@ -104,7 +104,7 @@ class InvestmentYearsResult:
         return benchmark_total
     
     def get_benchmark_roi(self):
-        benchmark_roi = [get_change_rate_by_year(stock_data("SPY"), year, default=self.params.interest_rate) for year in self.series('year')]
+        benchmark_roi = [get_change_rate_by_year(stock_data("SP500"), year, default=self.params.interest_rate) for year in self.series('year')]
         return benchmark_roi
 
     def get_benchmark_withdraw(self):
@@ -136,6 +136,7 @@ class InvestmentYearsResult:
         
         # Calculate growth rate
         duration = (self.params.end_year if zero_year is None else zero_year) - self.params.start_year
+        duration += 1 # need to add the initial year
         principle = self.years_result[-1]['principle']
         if duration > 0 and principle > 0:
             growth_rate = (((final_total + 1e-4) / principle) ** (1 / duration) - 1)
@@ -181,23 +182,34 @@ class InvestmentYearsResult:
         interest_rates = np.array([row['interest_rate'] for row in self.years_result])
         market_interest_rates = np.array(self.get_benchmark_roi())
         
-        # the solution of OLS
-        cov = np.cov(interest_rates, market_interest_rates)
-        beta = cov[0, 1] / cov[1, 1]
-        alpha = interest_rates.mean() - beta * market_interest_rates.mean()
+        if interest_rates.size == 1 or market_interest_rates.size == 1:
+            return {
+                'alpha': 0.0,
+                'beta': 0.0,
+                'sharp_ratio': 0.0,
+                'mean_rate': interest_rates.mean(),
+                'std_rate': interest_rates.std(),
+                'min_rate': interest_rates.min(),
+                'max_rate': interest_rates.max()
+            }
+        else:
+            # the solution of OLS
+            cov = np.cov(interest_rates, market_interest_rates)
+            beta = cov[0, 1] / cov[1, 1]
+            alpha = interest_rates.mean() - beta * market_interest_rates.mean()
 
-        interest_risk_free = self.get_risk_free_roi()
-        sharp_ratio = np.mean(interest_rates - interest_risk_free) / (np.std(interest_rates - interest_risk_free) + 1e-16)
+            interest_risk_free = self.get_risk_free_roi()
+            sharp_ratio = np.mean(interest_rates - interest_risk_free) / (np.std(interest_rates - interest_risk_free) + 1e-16)
 
-        return {
-            'alpha': alpha,
-            'beta': beta,
-            'sharp_ratio': sharp_ratio,
-            'mean_rate': np.mean(interest_rates),
-            'std_rate': np.std(interest_rates),
-            'min_rate': np.min(interest_rates),
-            'max_rate': np.max(interest_rates)
-        }
+            return {
+                'alpha': alpha,
+                'beta': beta,
+                'sharp_ratio': sharp_ratio,
+                'mean_rate': np.mean(interest_rates),
+                'std_rate': np.std(interest_rates),
+                'min_rate': np.min(interest_rates),
+                'max_rate': np.max(interest_rates)
+            }
 
     @property
     def financial_summary(self):
