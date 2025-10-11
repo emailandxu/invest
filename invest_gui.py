@@ -137,6 +137,25 @@ class PortfolioAllocationWidget(QWidget):
         self.activateWindow()
 
 
+class AnalysisReportWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Analysis Report")
+        self.resize(500, 700)
+        layout = QVBoxLayout(self)
+        self.text = QTextEdit()
+        self.text.setReadOnly(True)
+        layout.addWidget(self.text)
+
+    def set_report_text(self, text: str):
+        self.text.setPlainText(text or "")
+
+    def show_window(self):
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+
 class InvestmentControlPanel(QWidget):
     """Control panel widget containing all parameter sliders and checkboxes."""
     
@@ -145,6 +164,8 @@ class InvestmentControlPanel(QWidget):
         self.plot_panel = plot_panel
         self.on_parameter_change = on_parameter_change
         self.portfolio_widget = PortfolioAllocationWidget(initial_params, on_change=self._on_change)
+        self.report_window = AnalysisReportWindow()
+        self._latest_report_text = ""
         self.setup_ui()
     
     def setup_ui(self):
@@ -278,36 +299,39 @@ class InvestmentControlPanel(QWidget):
 
         # Reset and Refresh buttons
         button_widget = QWidget()
-        button_layout = QHBoxLayout(button_widget)
+        button_layout = QVBoxLayout(button_widget)
         button_layout.setContentsMargins(0, 0, 0, 0)
+        button_layout.setSpacing(4)
+        row1_layout = QHBoxLayout()
+        row1_layout.setContentsMargins(0, 0, 0, 0)
+        row1_layout.setSpacing(6)
+        row2_layout = QHBoxLayout()
+        row2_layout.setContentsMargins(0, 0, 0, 0)
+        row2_layout.setSpacing(6)
         
         reset_button = QPushButton("Reset")
         # reset_button.setFixedWidth((CONTROL_PANEL_WIDTH-15)//2)
         reset_button.clicked.connect(self.reset)
-        button_layout.addWidget(reset_button)
+        row1_layout.addWidget(reset_button)
 
         self.portfolio_button = QPushButton("Portfolio")
         self.portfolio_button.clicked.connect(self.portfolio_widget.show_portfolio_window)
-        button_layout.addWidget(self.portfolio_button)
+        row2_layout.addWidget(self.portfolio_button)
+
+        self.report_button = QPushButton("Report")
+        self.report_button.clicked.connect(self._show_report_window)
+        row2_layout.addWidget(self.report_button)
         
         refresh_button = QPushButton("Refresh")
         # refresh_button.setFixedWidth((CONTROL_PANEL_WIDTH-15)//2)
         refresh_button.clicked.connect(self._on_change)
-        button_layout.addWidget(refresh_button)
+        row1_layout.addWidget(refresh_button)
+        button_layout.addLayout(row1_layout)
+        button_layout.addLayout(row2_layout)
         
         layout.addWidget(button_widget)
-        
-        # Results display
-        conclusion_widget = QWidget()
-        conclusion_widget.setFixedWidth(CONTROL_PANEL_WIDTH)
-        conclusion_layout = QVBoxLayout(conclusion_widget)
-        conclusion_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.conclusion_text_widget = QTextEdit()
-        self.conclusion_text_widget.setReadOnly(True)
-        conclusion_layout.addWidget(self.conclusion_text_widget)
-        
-        layout.addWidget(conclusion_widget)
+
+        # Removed inline results panel; report now opens in a pop-out window.
 
         # Real Data checkboxes
         real_data_widget = QWidget()
@@ -408,8 +432,20 @@ class InvestmentControlPanel(QWidget):
 
 
     def update(self, msg: str=""):
-        """Update the results text display with formatted analysis."""
-        self.conclusion_text_widget.setPlainText(msg)
+        """Update the analysis report pop-out window content."""
+        self._latest_report_text = msg or ""
+        # Update window content if created
+        if self.report_window is not None:
+            self.report_window.set_report_text(self._latest_report_text)
+
+    def _show_report_window(self):
+        if self.report_window is None:
+            self.report_window = AnalysisReportWindow()
+            self.report_window.set_report_text(self._latest_report_text)
+        else:
+            # Ensure the window has the latest text before showing
+            self.report_window.set_report_text(self._latest_report_text)
+        self.report_window.show_window()
 
 class InvestmentPlotPanel(QWidget):
     """Plot panel widget containing all investment simulation plots."""
