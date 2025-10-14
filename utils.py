@@ -1,9 +1,14 @@
 USD = lambda x: x * 7.1
 
-def print_table(years_result):
-    columns = list(years_result[0].keys())
-    col_widths = {col: max(len(col), max(len(f"{row[col]:.2f}" if isinstance(row[col], float) else str(row[col])) for row in years_result)) for col in columns}
-    # col_widths = {col: len(col) for col in columns}
+def columns_name_of_rows(rows):
+    if row := next(iter(rows), None):
+        return list(row.keys())
+
+def print_table(rows, formats=None):
+    if formats is None:
+        formats = {}
+    columns = list(rows[0].keys())
+    col_widths = {col: max(len(col), max(len(f"{row[col]:{formats.get(col, '.2f')}}" if isinstance(row[col], float) else str(row[col])) for row in rows)) for col in columns}
     header = " | ".join(col.ljust(col_widths[col]) for col in columns)
-    formated_rows = [" | ".join([f"{row[col]:.2f}".ljust(col_widths[col]) if isinstance(row[col], float) else str(row[col]).ljust(col_widths[col]) for col in columns]) for row in years_result]
+    formated_rows = [" | ".join([f"{row[col]:{formats.get(col, '.2f')}}".ljust(col_widths[col]) if isinstance(row[col], float) else str(row[col]).ljust(col_widths[col]) for col in columns]) for row in rows]
     print(header, *formated_rows, sep="\n")

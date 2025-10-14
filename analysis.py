@@ -3,7 +3,7 @@ import csv
 from pathlib import Path
 from typing import Any, Dict, List
 
-from utils import USD, print_table
+from utils import USD, print_table, columns_name_of_rows
 import xml.etree.ElementTree as ET
 
 def _format_date(yyyymmdd: str) -> str:
@@ -108,7 +108,7 @@ def add_analysis(rows):
         if isinstance(total_usd, (int, float)) and prev_total_usd is not None:
             delta_usd = total_usd - prev_total_usd
             if prev_total_usd != 0:
-                change_rate_pct = (delta_usd / prev_total_usd) * 100.0
+                change_rate_pct = (delta_usd / prev_total_usd)
             else:
                 change_rate_pct = 0.0
         else:
@@ -133,7 +133,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Analyze IBKR reports and export to CSV.")
     parser.add_argument(
         "--file",
-        default="data/ibkr/primary_last_365_analysis.csv",
+        default="data/ibkr/primary_last_365.csv",
         help="Path to a CSV file previously exported via this script.",
     )
     parser.add_argument(
@@ -145,9 +145,16 @@ if __name__ == "__main__":
         help="Add analysis columns (delta, change rate) to the output.",
     )
     parser.add_argument(
-        "--no-print",
+        "--print",
+        type=int,
+        help="print how many rows of the table to stdout after processing.",
+        default=0,
+    )
+
+    parser.add_argument(
+        "--analysis",
         action="store_true",
-        help="Do not print the table to stdout after processing.",
+        help="Do analysis.",
     )
 
     args = parser.parse_args()
@@ -158,6 +165,9 @@ if __name__ == "__main__":
         rows = parse_account(args.file)
     else:
         raise ValueError("Input file must be .csv or .xml")
+    
+    if args.analysis:
+        rows = add_analysis(rows)
 
     if args.to_csv:
         save_rows_to_csv(rows, args.to_csv)
@@ -166,5 +176,8 @@ if __name__ == "__main__":
         analysis_rows = add_analysis(rows)
         save_rows_to_csv(analysis_rows, args.to_csv_analysis)
 
-    if rows and not args.no_print:
-        print_table(add_analysis(rows[-40:]))
+    if rows and args.print != 0:
+        assert len(rows) >= args.print, f"Not enough rows to print, maximum {len(rows)}."
+        formats = {col:".2%" for col in columns_name_of_rows(rows) if "pct" in col.lower() or "percent" in col.lower()}
+
+        print_table(rows[-args.print:], formats)
