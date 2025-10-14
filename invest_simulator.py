@@ -59,10 +59,11 @@ class InvestmentParams:
 
     def interest_rate_fn(self, year):
         """Get interest rate for a given year based on parameters."""
+        safe_ = lambda x: 0 if x is None else x
         if self.use_asset:
             if self.asset_code == "portfolio":
                 weighted_interest = [
-                    ratio * get_change_rate_by_year(stock_data(code), year, default=self.interest_rate)
+                    ratio * safe_(get_change_rate_by_year(stock_data(code), year, default=self.interest_rate))
                     if code != "CASH" else ratio * get_value_by_year(interest_data(), year, default=self.interest_rate)
                     for (code, ratio) in self.portfolio_data.items()
                 ]
