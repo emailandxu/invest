@@ -1,8 +1,19 @@
 import csv
 import os
 import pickle
+from dataclasses import dataclass
 from functools import lru_cache, reduce, wraps
-from typing import Dict
+from typing import Dict, List, Optional, Tuple
+
+
+@dataclass
+class YearRecord:
+    date: str
+    year: int
+    month: int
+    day: int
+    value: Optional[float]
+    change_rate: Optional[float] = None
 def file_cache(filepath):
     """
     Decorator that caches function results based on file modification time and size.
@@ -52,256 +63,169 @@ def file_cache(filepath):
         return wrapper
     return decorator
 
+def _parse_date_fast(date_str: str) -> Optional[Tuple[int, int, int]]:
+    """Parse date strings in formats YYYY-MM-DD or MM/DD/YYYY without strptime."""
+    if not date_str:
+        return None
 
+    if '-' in date_str:
+        parts = date_str.split('-')
+        if len(parts) != 3:
+            return None
+        year, month, day = parts
+    elif '/' in date_str:
+        parts = date_str.split('/')
+        if len(parts) != 3:
+            return None
+        month, day, year = parts
+    else:
+        return None
 
-def read_data(csv_path='data/sp500.csv'):
-    """
-    Read S&P 500 data from CSV file.
-    
-    Args:
-        csv_path (str): Path to the S&P 500 CSV file
-        
-    Returns:
-        list: List of dictionaries containing S&P 500 data
-    """
     try:
-        data = []
+        return int(year), int(month), int(day)
+    except ValueError:
+        return None
+
+
+def _to_float(value: Optional[str]) -> Optional[float]:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def read_data(csv_path='data/sp500.csv') -> Tuple[List[str], Dict[str, int], List[List[str]]]:
+    """Read CSV data and return headers, header index, and raw rows."""
+    try:
         with open(csv_path, 'r', newline='', encoding='utf-8-sig') as csvfile:
-            reader = csv.DictReader(csvfile)
+            reader = csv.reader(csvfile)
+            headers = next(reader, None)
+            if headers is None:
+                return [], {}, []
+            headers = [header.strip() for header in headers]
+            header_index = {header: idx for idx, header in enumerate(headers)}
+
+            rows: List[List[str]] = []
+            column_count = len(headers)
             for row in reader:
-                data.append(row)
-        return data
+                if len(row) < column_count:
+                    row = row + [''] * (column_count - len(row))
+                rows.append(row)
+
+        return headers, header_index, rows
     except FileNotFoundError:
         print(f"Error: Could not find file {csv_path}")
-        return None
+        return [], {}, []
     except Exception as e:
         print(f"Error reading CSV file: {e}")
-        return None
-def extract_year_end_data_by_month(data, month=12):
-    """
-    Process S&P 500 data by converting dates and extracting yearly data.
-    
-    Args:
-        data (list): Raw S&P 500 data as list of dictionaries
-        
-    Returns:
-        list: Processed S&P 500 data with yearly records
-    """
-    if data is not None:
-        from datetime import datetime
-        
-        # Convert Date column to datetime if it exists
-        for row in data:
-            if 'Date' in row:
-                try:
-                    date_obj = datetime.strptime(row['Date'], '%Y-%m-%d')
-                    row['Year'] = date_obj.year
-                    row['Month'] = date_obj.month
-                except ValueError:
-                    # Try alternative date formats
-                    try:
-                        date_obj = datetime.strptime(row['Date'], '%m/%d/%Y')
-                        row['Year'] = date_obj.year
-                        row['Month'] = date_obj.month
-                    except ValueError:
-                        continue
-        
-        # Get the specified month data of each year (last entry if multiple exist)
-        year_groups = {}
-        for row in data:
-            year = row.get('Year')
-            month_val = row.get('Month')
-            if year is not None and month_val == month:
-                if year not in year_groups:
-                    year_groups[year] = []
-                year_groups[year].append(row)
-        
-        # Get the last entry for each year in case there are multiple rows for the same month
-        year_data = []
-        for year in sorted(year_groups.keys()):
-            year_data.append(year_groups[year][-1])
-    else:
-        year_data = None
-    
-    return year_data
+        return [], {}, []
+def extract_year_end_data_by_month(csv_data: Tuple[List[str], Dict[str, int], List[List[str]]], month=12) -> List[YearRecord]:
+    """Process market data by converting dates and extracting the target month."""
+    headers, index, rows = csv_data
+    if not rows:
+        return []
 
-def extract_year_data_by_mean(data):
-    """
-    Process S&P 500 data by converting dates and extracting yearly data using mean values.
-    
-    Args:
-        data (list): Raw S&P 500 data as list of dictionaries
-        
-    Returns:
-        list: Processed S&P 500 data with yearly records averaged
-    """
-    if data is not None:
-        from datetime import datetime
-        
-        # Convert Date column to datetime if it exists
-        for row in data:
-            if 'Date' in row:
-                try:
-                    date_obj = datetime.strptime(row['Date'], '%Y-%m-%d')
-                    row['Year'] = date_obj.year
-                    row['Month'] = date_obj.month
-                except ValueError:
-                    # Try alternative date formats
-                    try:
-                        date_obj = datetime.strptime(row['Date'], '%m/%d/%Y')
-                        row['Year'] = date_obj.year
-                        row['Month'] = date_obj.month
-                    except ValueError:
-                        continue
-        
-        # Group data by year and calculate mean values
-        year_groups = {}
-        for row in data:
-            year = row.get('Year')
-            if year is not None:
-                if year not in year_groups:
-                    year_groups[year] = []
-                year_groups[year].append(row)
-        
-        # Calculate mean values for each year
-        year_data = []
-        for year, rows in year_groups.items():
-            if 'Value' in rows[0]:
-                try:
-                    values = [float(row['Value']) for row in rows if row.get('Value')]
-                    if values:
-                        mean_value = sum(values) / len(values)
-                        year_data.append({
-                            'Date': f"{year}-12-31",  # Use end of year as representative date
-                            'Year': year,
-                            'Month': 12,
-                            'Value': str(mean_value)
-                        })
-                except ValueError:
-                    continue
-        
-        # Sort by year
-        year_data.sort(key=lambda x: x.get('Year', 0))
-    else:
-        year_data = None
-    
-    return year_data
+    date_idx = index.get('Date')
+    value_idx = index.get('Value')
 
-def compute_annual_change_rate(year_data):
-    """
-    Compute annual change rate for S&P 500 data.
-    
-    Args:
-        year_data (list): Yearly S&P 500 data as list of dictionaries
-        
-    Returns:
-        list: List of dictionaries with annual change rates added
-    """
-    if year_data is None or len(year_data) == 0:
-        return None
-    
-    # Make a copy to avoid modifying the original data
-    data = [row.copy() for row in year_data]
-    
-    # Sort by year to ensure proper order
-    data.sort(key=lambda x: x.get('Year', 0))
-    
-    # Calculate annual change rate
-    # Using the 'Value' column for S&P 500 data
-    price_column = 'Value'
-    
-    if not any(price_column in row for row in data):
-        print("Warning: Could not find 'Value' column")
-        return data
-    
-    # Calculate year-over-year change rate
-    for i, row in enumerate(data):
-        if i == 0:
-            row['Change_Rate'] = None  # First row has no previous year
+    year_records: Dict[int, YearRecord] = {}
+    for row in rows:
+        date_str = row[date_idx] if date_idx is not None and date_idx < len(row) else ''
+        parsed = _parse_date_fast(date_str)
+        if not parsed:
+            continue
+        year, month_val, day = parsed
+        if month_val != month:
+            continue
+
+        value = _to_float(row[value_idx]) if value_idx is not None and value_idx < len(row) else None
+        year_records[year] = YearRecord(date=date_str, year=year, month=month_val, day=day, value=value)
+
+    return sorted(year_records.values(), key=lambda r: r.year)
+
+
+def extract_year_data_by_mean(csv_data: Tuple[List[str], Dict[str, int], List[List[str]]]) -> List[YearRecord]:
+    """Aggregate monthly data into yearly means."""
+    headers, index, rows = csv_data
+    if not rows:
+        return []
+
+    date_idx = index.get('Date')
+    value_idx = index.get('Value')
+    if date_idx is None or value_idx is None:
+        return []
+
+    year_groups: Dict[int, List[float]] = {}
+    for row in rows:
+        date_str = row[date_idx] if date_idx < len(row) else ''
+        parsed = _parse_date_fast(date_str)
+        if not parsed:
+            continue
+        year, month_val, day = parsed
+        value = _to_float(row[value_idx])
+        if value is None:
+            continue
+        year_groups.setdefault(year, []).append(value)
+
+    year_data: List[YearRecord] = []
+    for year, values in year_groups.items():
+        if not values:
+            continue
+        mean_value = sum(values) / len(values)
+        year_data.append(YearRecord(date=f"{year}-12-31", year=year, month=12, day=31, value=mean_value))
+
+    return sorted(year_data, key=lambda r: r.year)
+
+def compute_annual_change_rate(year_data: List[YearRecord]) -> List[YearRecord]:
+    """Compute annual change rate for yearly market data."""
+    if not year_data:
+        return []
+
+    data = sorted(year_data, key=lambda r: r.year)
+    previous_value = None
+    for record in data:
+        current_value = record.value
+        if previous_value is None or current_value is None or previous_value == 0:
+            record.change_rate = None
         else:
-            try:
-                current_value = float(row[price_column])
-                previous_value = float(data[i-1][price_column])
-                if previous_value != 0:
-                    row['Change_Rate'] = (current_value - previous_value) / previous_value
-                else:
-                    row['Change_Rate'] = None
-            except (ValueError, KeyError):
-                row['Change_Rate'] = None
-    
+            record.change_rate = (current_value - previous_value) / previous_value
+        if current_value is not None:
+            previous_value = current_value
     return data
 
-def filter_data_after_1960(year_data):
-    """
-    Filter S&P 500 data to only include years 1960 and after.
-    
-    Args:
-        year_data (list): S&P 500 yearly data as list of dictionaries
-        
-    Returns:
-        list: Filtered data with years >= 1960, or None if input is None
-    """
-    if year_data is None or len(year_data) == 0:
-        return None
-    
-    # Filter data to only include years 1960 and after
-    filtered_data = [row for row in year_data if row.get('Year', 0) >= 1960]
-    
-    return filtered_data
 
-def get_change_rate_by_year(data, year, default=None):
-    """
-    Get the change rate for a specific year from S&P 500 data.
-    
-    Args:
-        year (int): The year to get the change rate for
-        
-    Returns:
-        float: The change rate for the given year, or None if year not found
-    """    
-    if data is None or len(data) == 0:
-        return None
-    
-    # Find the row for the given year
-    # year_row = None
-    # for row in data:
-    #     if row.get('Year') == year:
-    #         year_row = row
-    #         break
-    # if year_row is None:
-    #     return default
-    year_index = year - data[0].get('Year') 
+def filter_data_after_1960(year_data: List[YearRecord]) -> List[YearRecord]:
+    """Filter yearly data to only include years 1960 and after."""
+    if not year_data:
+        return []
+    return [row for row in year_data if row.year >= 1960]
+
+def get_change_rate_by_year(data: List[YearRecord], year: int, default=None):
+    """Get the change rate for a specific year."""
+    if not data:
+        return default
+
+    base_year = data[0].year
+    year_index = year - base_year
     if year_index < 0 or year_index >= len(data):
         return default
-    
-    year_row = data[year_index]
-    
-    # Return the change rate for that year
-    value = year_row.get('Change_Rate')
-    if value is None:
+
+    value = data[year_index].change_rate
+    return default if value is None else value
+
+
+def get_value_by_year(data: List[YearRecord], year: int, default=None):
+    if not data:
         return default
-    return value
 
-def get_value_by_year(data, year, default=None):
-    if data is None or len(data) == 0:
-        return None
-    
-    # Find the row for the given year
-    # year_row = None
-    # for row in data:
-    #     if row.get('Year') == year:
-    #         year_row = row
-    #         break
-    
-    # if year_row is None:
-    #     return default
-
-    year_index = year - data[0].get('Year') 
+    base_year = data[0].year
+    year_index = year - base_year
     if year_index < 0 or year_index >= len(data):
         return default
-    year_row = data[year_index]
-    # Return the change rate for that year
-    return year_row.get('Value')
+    value = data[year_index].value
+    return default if value is None else value
 
 
 @lru_cache(maxsize=None)
@@ -318,9 +242,8 @@ def stock_data(code="SP500"):
     #         pass  # Fall through to recompute if pickle is corrupted
     
     # Process the data
-    data = read_data(csv_path=csv_path)
-    year_data = extract_year_end_data_by_month(data, month=12)
-    # year_data = extract_year_data_by_mean(data)
+    csv_data = read_data(csv_path=csv_path)
+    year_data = extract_year_end_data_by_month(csv_data, month=12)
     year_data = compute_annual_change_rate(year_data)
     # year_data = filter_data_after_1960(year_data)
     
@@ -347,17 +270,13 @@ def interest_data():
             pass  # Fall through to recompute if pickle is corrupted
     
     # Process the data
-    data = read_data(csv_path=csv_path)
-    # year_data = extract_year_end_data_by_month(data, month=12)
-    year_data = extract_year_data_by_mean(data)
+    csv_data = read_data(csv_path=csv_path)
+    year_data = extract_year_data_by_mean(csv_data)
     year_data = compute_annual_change_rate(year_data)
     # Convert value to float, divide by 100, and add 1.0 for interest rate processing
     for row in year_data:
-        if 'Value' in row and row['Value'] is not None:
-            try:
-                row['Value'] = float(row['Value']) / 100
-            except (ValueError, TypeError):
-                row['Value'] = None
+        if row.value is not None:
+            row.value = row.value / 100.0
     
     # Save to pickle cache
     try:
@@ -382,16 +301,12 @@ def inflation_data():
             pass  # Fall through to recompute if pickle is corrupted
     
     # Process the data
-    data = read_data(csv_path=csv_path)
-    year_data = extract_year_end_data_by_month(data, month=12)
+    csv_data = read_data(csv_path=csv_path)
+    year_data = extract_year_end_data_by_month(csv_data, month=12)
     year_data = compute_annual_change_rate(year_data)
-    # Convert value to float, divide by 100, and add 1.0 for interest rate processing
     for row in year_data:
-        if 'Value' in row and row['Value'] is not None:
-            try:
-                row['Value'] = float(row['Value']) / 100
-            except (ValueError, TypeError):
-                row['Value'] = None
+        if row.value is not None:
+            row.value = row.value / 100.0
     
     # Save to pickle cache
     try:
@@ -411,11 +326,20 @@ def portfolio_data() -> Dict[str, float]:
         Dict[str, float]: Dictionary mapping asset codes to their allocation ratios
     """
     csv_path = "data/portfolio.csv"
-    data = read_data(csv_path=csv_path)
-    pdata = data[0]
-    codes = list(map(lambda x: x.strip(), pdata.keys()))
-    ratios = [ float(pdata[code]) for code in codes ]
-    portfolio_data = dict(zip(codes,ratios))
+    headers, index, rows = read_data(csv_path=csv_path)
+    if not rows:
+        return {}
+
+    first_row = rows[0]
+    codes = [header.strip() for header in headers]
+    ratios = []
+    for code in codes:
+        idx = index.get(code)
+        raw_value = first_row[idx] if idx is not None and idx < len(first_row) else "0"
+        value = _to_float(raw_value)
+        ratios.append(value if value is not None else 0.0)
+
+    portfolio_data = dict(zip(codes, ratios))
     print(portfolio_data)
     return portfolio_data
 
@@ -426,182 +350,6 @@ def inflation_rate_multiplier(year, start_year, default=0.00):
         return cpi
     else:
         return cpi * inflation_rate_multiplier(year-1, start_year, default=default)
-
-def gui_data(data):
-    import tkinter as tk
-    from tkinter import ttk
-    
-    def create_gui():
-        root = tk.Tk()
-        root.title("S&P 500 Data Analyzer")
-        root.geometry("800x600")
-        
-        # Get data
-        data_length = len(data) if data else 0
-        
-        # Create main frames
-        main_frame = ttk.Frame(root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
-        # Offset slider
-        ttk.Label(main_frame, text="Offset:").grid(row=0, column=0, sticky=tk.W, pady=5)
-        offset_var = tk.IntVar(value=max(0, data_length-20))
-        offset_scale = ttk.Scale(main_frame, from_=-data_length, to=data_length-1, variable=offset_var, orient=tk.HORIZONTAL, length=300)
-        offset_scale.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=5, padx=10)
-        offset_label = ttk.Label(main_frame, text=str(offset_var.get()))
-        offset_label.grid(row=0, column=2, sticky=tk.W, pady=5)
-        
-        # Start slider
-        ttk.Label(main_frame, text="Start:").grid(row=1, column=0, sticky=tk.W, pady=5)
-        start_var = tk.IntVar(value=0)
-        start_scale = ttk.Scale(main_frame, from_=0, to=data_length-1, variable=start_var, orient=tk.HORIZONTAL, length=300)
-        start_scale.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=5, padx=10)
-        start_label = ttk.Label(main_frame, text=str(start_var.get()))
-        start_label.grid(row=1, column=2, sticky=tk.W, pady=5)
-        
-        # End slider
-        ttk.Label(main_frame, text="End:").grid(row=2, column=0, sticky=tk.W, pady=5)
-        end_var = tk.IntVar(value=3)
-        end_scale = ttk.Scale(main_frame, from_=0, to=data_length, variable=end_var, orient=tk.HORIZONTAL, length=300)
-        end_scale.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=5, padx=10)
-        end_label = ttk.Label(main_frame, text=str(end_var.get()))
-        end_label.grid(row=2, column=2, sticky=tk.W, pady=5)
-        
-        # Year range label
-        year_range_label = ttk.Label(main_frame, text="", font=("Arial", 10, "bold"))
-        year_range_label.grid(row=3, column=0, columnspan=3, pady=5)
-        
-        # Text widget for data display
-        text_frame = ttk.Frame(main_frame)
-        text_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
-        
-        text_widget = tk.Text(text_frame, height=20, width=80, wrap=tk.WORD)
-        scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=text_widget.yview)
-        text_widget.configure(yscrollcommand=scrollbar.set)
-        
-        text_widget.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
-        
-        # Result label
-        result_label = ttk.Label(main_frame, text="", font=("Arial", 12, "bold"))
-        result_label.grid(row=5, column=0, columnspan=3, pady=10)
-        
-        def update_display(*args):
-            if not data:
-                return
-                
-            offset = offset_var.get()
-            start = start_var.get()
-            end = end_var.get()
-
-            if start_var.get() + offset < 0:
-                offset = -start
-            elif end_var.get() + offset > data_length:
-                offset = data_length - end
-
-            start += offset
-            end += offset
-
-            # Update labels
-            offset_label.config(text=str(offset))
-            start_label.config(text=str(start))
-            end_label.config(text=str(end))
-            
-            # Ensure end is not less than start
-            if end <= start:
-                end = start + 1
-                end_var.set(end - offset)
-            
-            # Ensure indices are within bounds
-            start = max(0, min(start, data_length - 1))
-            end = max(start + 1, min(end, data_length))
-            
-            # Get subset of data
-            subset_data = data[start:end]
-            
-            # Update year range label
-            if subset_data:
-                years = [row.get('Year') for row in subset_data if row.get('Year') is not None]
-                if years:
-                    start_year = min(years)
-                    end_year = max(years)
-                    unique_years = list(set(years))
-                    years_str = str(len(unique_years))
-                    year_range_label.config(text=f"Year Range: {start_year} - {end_year} | Years: {years_str}")
-                else:
-                    year_range_label.config(text="Year Range: N/A")
-            else:
-                year_range_label.config(text="Year Range: N/A")
-            
-            # Clear text widget
-            text_widget.delete(1.0, tk.END)
-            
-            # Display data
-            if subset_data:
-                text_widget.insert(tk.END, "Selected Data:\n")
-                text_widget.insert(tk.END, "=" * 50 + "\n")
-                
-                # Format data for display
-                for i, row in enumerate(subset_data):
-                    text_widget.insert(tk.END, f"Row {start + i}:\n")
-                    for key, value in row.items():
-                        text_widget.insert(tk.END, f"  {key}: {value}\n")
-                    text_widget.insert(tk.END, "\n")
-                
-                # Calculate and display reduced result
-                change_rates = [row.get('Change_Rate') for row in subset_data if row.get('Change_Rate') is not None]
-                if change_rates:
-                    result = reduce(lambda x, y: x * (1 + y), change_rates, 1)
-                    
-                    # Calculate annual return rate
-                    num_years = len(change_rates)
-                    if num_years > 1:
-                        annual_return = (result ** (1/num_years)) - 1
-                        mean_change_rate = sum(change_rates) / len(change_rates)
-                        std_change_rate = (sum((x - mean_change_rate) ** 2 for x in change_rates) / len(change_rates)) ** 0.5
-                        result_label.config(text=f"Cumulative Growth Factor: {result:.6f} | Annual Return: {annual_return:.4%} | Mean: {mean_change_rate:.4%} | Std: {std_change_rate:.4%}")
-                    else:
-                        result_label.config(text=f"Cumulative Growth Factor: {result:.6f}")
-                else:
-                    result_label.config(text="No valid change rate data in selection")
-            else:
-                text_widget.insert(tk.END, "No data in selected range")
-                result_label.config(text="")
-        
-        # Key event handler for offset adjustment
-        def on_key_press(event):
-            current_offset = offset_var.get()
-            if event.keysym == 'Left':
-                new_offset = max(-data_length, current_offset - 1)
-                offset_var.set(new_offset)
-            elif event.keysym == 'Right':
-                new_offset = min(data_length - 1, current_offset + 1)
-                offset_var.set(new_offset)
-        
-        # Bind slider events
-        offset_var.trace('w', update_display)
-        start_var.trace('w', update_display)
-        end_var.trace('w', update_display)
-        
-        # Bind key events
-        root.bind('<Left>', on_key_press)
-        root.bind('<Right>', on_key_press)
-        root.focus_set()  # Ensure the root window can receive key events
-        
-        # Configure grid weights
-        root.columnconfigure(0, weight=1)
-        root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(4, weight=1)
-        text_frame.columnconfigure(0, weight=1)
-        text_frame.rowconfigure(0, weight=1)
-        
-        # Initial display
-        update_display()
-        
-        root.mainloop()
-    
-    create_gui()
 
 if __name__ == "__main__":
     # gui_data(interest_data())
