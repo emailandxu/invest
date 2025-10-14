@@ -4,7 +4,7 @@ from functools import lru_cache, reduce
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QGridLayout, QLabel, QSlider, 
                             QCheckBox, QPushButton, QTextEdit, QComboBox)
@@ -163,7 +163,12 @@ class InvestmentControlPanel(QWidget):
         super().__init__()
         self.plot_panel = plot_panel
         self.on_parameter_change = on_parameter_change
-        self.portfolio_widget = PortfolioAllocationWidget(initial_params, on_change=self._on_change)
+        self._update_timer = QTimer(self)
+        self._update_timer.setInterval(200)
+        self._update_timer.setSingleShot(True)
+        self._update_timer.timeout.connect(self._emit_parameter_change)
+
+        self.portfolio_widget = PortfolioAllocationWidget(initial_params, on_change=self._queue_update)
         self.report_window = AnalysisReportWindow()
         self._latest_report_text = ""
         self.setup_ui()
@@ -184,7 +189,7 @@ class InvestmentControlPanel(QWidget):
         # Start Year
         self.start_year_slider = QSlider(Qt.Horizontal)
         self.start_year_slider.setRange(1954, 2100)
-        self.start_year_slider.valueChanged.connect(self._on_change)
+        self.start_year_slider.valueChanged.connect(self._queue_update)
         self.start_year_label = QLabel()
         row += 1
         grid_layout.addWidget(self.start_year_slider, row, 0)
@@ -193,7 +198,7 @@ class InvestmentControlPanel(QWidget):
         # Duration
         self.duration_slider = QSlider(Qt.Horizontal)
         self.duration_slider.setRange(0, 99)
-        self.duration_slider.valueChanged.connect(self._on_change)
+        self.duration_slider.valueChanged.connect(self._queue_update)
         self.duration_label = QLabel()
         row += 1
         grid_layout.addWidget(self.duration_slider, row, 0)
@@ -202,7 +207,7 @@ class InvestmentControlPanel(QWidget):
         # Retirement Offset
         self.retire_offset_slider = QSlider(Qt.Horizontal)
         self.retire_offset_slider.setRange(0, 99)
-        self.retire_offset_slider.valueChanged.connect(self._on_change)
+        self.retire_offset_slider.valueChanged.connect(self._queue_update)
         self.retire_offset_label = QLabel()
         row += 1
         grid_layout.addWidget(self.retire_offset_slider, row, 0)
@@ -211,7 +216,7 @@ class InvestmentControlPanel(QWidget):
         # Start Total
         self.start_total_slider = QSlider(Qt.Horizontal)
         self.start_total_slider.setRange(1, int(USD(2000)))  # Scale by 10 for decimal precision
-        self.start_total_slider.valueChanged.connect(self._on_change)
+        self.start_total_slider.valueChanged.connect(self._queue_update)
         self.start_total_label = QLabel()
         row += 1
         grid_layout.addWidget(self.start_total_slider, row, 0)
@@ -220,7 +225,7 @@ class InvestmentControlPanel(QWidget):
         # Annual Cost
         self.cost_slider = QSlider(Qt.Horizontal)
         self.cost_slider.setRange(1, int(USD(500)))  # Scale by 100 for decimal precision
-        self.cost_slider.valueChanged.connect(self._on_change)
+        self.cost_slider.valueChanged.connect(self._queue_update)
         self.cost_label = QLabel()
         row += 1
         grid_layout.addWidget(self.cost_slider, row, 0)
@@ -229,7 +234,7 @@ class InvestmentControlPanel(QWidget):
         # CPI
         self.cpi_slider = QSlider(Qt.Horizontal)
         self.cpi_slider.setRange(0, 1000)  # Scale by 10000 for decimal precision
-        self.cpi_slider.valueChanged.connect(self._on_change)
+        self.cpi_slider.valueChanged.connect(self._queue_update)
         self.cpi_label = QLabel()
         row += 1
         grid_layout.addWidget(self.cpi_slider, row, 0)
@@ -238,7 +243,7 @@ class InvestmentControlPanel(QWidget):
         # Interest Rate
         self.interest_rate_slider = QSlider(Qt.Horizontal)
         self.interest_rate_slider.setRange(0, 1500)  # Scale by 10000 for decimal precision
-        self.interest_rate_slider.valueChanged.connect(self._on_change)
+        self.interest_rate_slider.valueChanged.connect(self._queue_update)
         self.interest_rate_label = QLabel()
         row += 1
         grid_layout.addWidget(self.interest_rate_slider, row, 0)
@@ -247,7 +252,7 @@ class InvestmentControlPanel(QWidget):
         # Principle Amount
         self.new_savings_slider = QSlider(Qt.Horizontal)
         self.new_savings_slider.setRange(0, int(USD(1000)))  # Scale by 100 for decimal precision
-        self.new_savings_slider.valueChanged.connect(self._on_change)
+        self.new_savings_slider.valueChanged.connect(self._queue_update)
         self.new_savings_label = QLabel()
         row += 1
         grid_layout.addWidget(self.new_savings_slider, row, 0)
@@ -264,7 +269,7 @@ class InvestmentControlPanel(QWidget):
         asset_layout.setContentsMargins(0, 0, 0, 0)
         self.asset_code_combo = QComboBox()
         self.asset_code_combo.addItems(asset_codes)
-        self.asset_code_combo.currentTextChanged.connect(self._on_change)
+        self.asset_code_combo.currentTextChanged.connect(self._queue_update)
         asset_layout.addWidget(QLabel("Red (main):"))
         asset_layout.addWidget(self.asset_code_combo)
         grid_layout.addWidget(asset_widget, row, 0, 1, 2)
@@ -276,7 +281,7 @@ class InvestmentControlPanel(QWidget):
         compare_layout.setContentsMargins(0, 0, 0, 0)
         self.compare_code_combo = QComboBox()
         self.compare_code_combo.addItems(["None"] + asset_codes)
-        self.compare_code_combo.currentTextChanged.connect(self._on_change)
+        self.compare_code_combo.currentTextChanged.connect(self._queue_update)
         compare_layout.addWidget(QLabel("Yellow:"))
         compare_layout.addWidget(self.compare_code_combo)
         grid_layout.addWidget(compare_widget, row, 0, 1, 2)
@@ -288,7 +293,7 @@ class InvestmentControlPanel(QWidget):
         compare_layout_b.setContentsMargins(0, 0, 0, 0)
         self.compare_code_combo_b = QComboBox()
         self.compare_code_combo_b.addItems(["None"] + asset_codes)
-        self.compare_code_combo_b.currentTextChanged.connect(self._on_change)
+        self.compare_code_combo_b.currentTextChanged.connect(self._queue_update)
         compare_layout_b.addWidget(QLabel("Green:"))
         compare_layout_b.addWidget(self.compare_code_combo_b)
         grid_layout.addWidget(compare_widget_b, row, 0, 1, 2)
@@ -324,7 +329,7 @@ class InvestmentControlPanel(QWidget):
         
         refresh_button = QPushButton("Refresh")
         # refresh_button.setFixedWidth((CONTROL_PANEL_WIDTH-15)//2)
-        refresh_button.clicked.connect(self._on_change)
+        refresh_button.clicked.connect(self._emit_parameter_change)
         row1_layout.addWidget(refresh_button)
         button_layout.addLayout(row1_layout)
         button_layout.addLayout(row2_layout)
@@ -344,12 +349,12 @@ class InvestmentControlPanel(QWidget):
             "Asset",
             "Interest Rate",
         ])
-        self.data_source_combo.currentIndexChanged.connect(self._on_change)
+        self.data_source_combo.currentIndexChanged.connect(self._queue_update)
         real_data_layout.addWidget(QLabel("Data Source:"), 0, 0)
         real_data_layout.addWidget(self.data_source_combo, 1, 0)
         
         self.adptive_withdraw_rate_checkbox = QCheckBox(text="Adaptive Withdraw")
-        self.adptive_withdraw_rate_checkbox.stateChanged.connect(self._on_change)
+        self.adptive_withdraw_rate_checkbox.stateChanged.connect(self._queue_update)
         real_data_layout.addWidget(self.adptive_withdraw_rate_checkbox, 3, 0)
         
         self.show_benchmark_checkbox = QCheckBox(text="Show Benchmark")
@@ -357,9 +362,12 @@ class InvestmentControlPanel(QWidget):
         real_data_layout.addWidget(self.show_benchmark_checkbox, 4, 0)
         layout.addWidget(real_data_widget)
 
-    def _on_change(self):
-        """Internal callback that updates labels and triggers external callback."""
+    def _queue_update(self):
+        """Throttle parameter change notifications using a short timer."""
         self.update_labels()
+        self._update_timer.start()
+
+    def _emit_parameter_change(self):
         if self.on_parameter_change:
             self.on_parameter_change()
 
@@ -426,7 +434,8 @@ class InvestmentControlPanel(QWidget):
     def reset(self):
         """Reset all controls to default values."""
         self.set_parameters(InvestmentParams.get_defaults())
-        self._on_change()
+        self.update_labels()
+        self._emit_parameter_change()
         # Disconnect signals temporarily to avoid triggering on change
         self.show_benchmark_checkbox.setChecked(True)
 
@@ -571,7 +580,10 @@ class InvestmentPlotPanel(QWidget):
 
 
         # Add text labels showing exact values on each point
+        step = max(1, len(years) // 25)
         for i, (year, value) in enumerate(zip(years, withdraw_data)):
+            if i % step:
+                continue
             monthly_withdraw_inflation = (value+1e-16)/(benchmark_withdrawals[i]+1e-16) * years_result.params.cost / 12
             monthly_withdraw_text = f'{monthly_withdraw_inflation*100:.0f}'
             # monthly_withdraw_text += "\n\n" + f"{value / 12 * 100:.0f}"
@@ -592,45 +604,49 @@ class InvestmentPlotPanel(QWidget):
 
     def draw_all_plots(self, years_result: InvestmentYearsResult=None, color="blue"):
         """Update all plots with simulation results."""
-        # Helper function to extract series data
         years = years_result.series('year')
-        # Plot 1: Total Amount
-        self.plot_total.plot(years, years_result.series('total'), pen=pg.mkPen(color=color, width=2), 
-                            symbol='o', symbolSize=4, symbolBrush=color)
+        totals = years_result.series('total')
+        interest_rates = years_result.series('interest_rate', lambda v: round(v, 4))
+        withdraw_rates = years_result.series('withdraw_rate', lambda v: round(v, 4))
+        interest_totals = years_result.series('interest_total')
+        withdrawals = years_result.series('withdraw', lambda v: round(v, 2))
+        ratios = years_result.series('withdrawed_interest_vs_principle')
+
+        self.plot_total.plot(years, totals, pen=pg.mkPen(color=color, width=2), 
+                             symbol='o', symbolSize=4, symbolBrush=color)
         
 
         # Plot 2: Interest Rate
-        self.plot_interest_rate.plot(years, years_result.series('interest_rate', lambda v: round(v, 4)), 
-                                    pen=pg.mkPen(color=color, width=2), 
-                                    symbol='s', symbolSize=4, symbolBrush=color)
-        
+        self.plot_interest_rate.plot(years, interest_rates,
+                                     pen=pg.mkPen(color=color, width=2),
+                                     symbol='s', symbolSize=4, symbolBrush=color)
+
 
         # Plot 3: Withdraw Rate
-        self.plot_withdraw_rate.plot(years, years_result.series('withdraw_rate', lambda v: round(v, 4)), 
-                                              pen=pg.mkPen(color=color, width=2), 
-                                              symbol='x', symbolSize=4, symbolBrush=color)
-        
+        self.plot_withdraw_rate.plot(years, withdraw_rates,
+                                     pen=pg.mkPen(color=color, width=2),
+                                     symbol='x', symbolSize=4, symbolBrush=color)
+
         # Plot 4: Annual Interest
-        self.plot_interest_total.plot(years, years_result.series('interest_total'), pen=pg.mkPen(color=color, width=2), 
-                               symbol='t', symbolSize=4, symbolBrush=color)
+        self.plot_interest_total.plot(years, interest_totals, pen=pg.mkPen(color=color, width=2),
+                                      symbol='t', symbolSize=4, symbolBrush=color)
 
         # Plot 5: Annual Withdrawals
-        self.plot_withdraw.plot(years, years_result.series('withdraw', lambda v: round(v, 2)), 
-                               pen=pg.mkPen(color=color, width=2), 
-                               symbol='h', symbolSize=4, symbolBrush=color)
+        self.plot_withdraw.plot(years, withdrawals,
+                                pen=pg.mkPen(color=color, width=2),
+                                symbol='h', symbolSize=4, symbolBrush=color)
         
 
 
         # Plot 6: Interest VS Principle
-        self.plot_ratio.plot(years, years_result.series('withdrawed_interest_vs_principle'), 
-                            pen=pg.mkPen(color=color, width=2), 
-                            symbol='d', symbolSize=4, symbolBrush=color)
+        self.plot_ratio.plot(years, ratios,
+                             pen=pg.mkPen(color=color, width=2),
+                             symbol='d', symbolSize=4, symbolBrush=color)
         
         # Also plot interest vs principle
         # self.plot_ratio.plot(years, years_result.series('interest_vs_principle'), 
         #                     pen=pg.mkPen(color=color, width=2), 
         #                     symbol='o', symbolSize=4, symbolBrush=color)
-
  
 
 class InvestmentSimulatorGui(QMainWindow):
@@ -685,7 +701,9 @@ class InvestmentSimulatorGui(QMainWindow):
         return strategy()
     
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Left:
+        if event.key() == Qt.Key_Escape or event.key() == Qt.Key_Q:
+            QApplication.instance().quit()
+        elif event.key() == Qt.Key_Left:
             current_year = self.control_panel.start_year_slider.value()
             self.control_panel.start_year_slider.setValue(current_year - 1)
         elif event.key() == Qt.Key_Right:
