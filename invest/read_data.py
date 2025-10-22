@@ -1,4 +1,5 @@
 import csv
+import os
 import pickle
 from dataclasses import dataclass
 from functools import lru_cache, reduce, wraps
@@ -9,7 +10,7 @@ from ._paths import data_path
 
 
 @dataclass
-class YearRecord:
+class Record:
     date: str
     year: int
     month: int
@@ -27,20 +28,18 @@ def file_cache(filepath):
     Returns:
         Decorator function
     """
-    path = Path(filepath)
-
     def decorator(func):
         cache = {}
         
         @wraps(func)
         def wrapper(*args, **kwargs):
             # Check if file exists
-            if not path.exists():
+            if not os.path.exists(filepath):
                 # If file doesn't exist, always call function
                 return func(*args, **kwargs)
             
             # Get file modification time and size for quick check
-            stat = path.stat()
+            stat = os.stat(filepath)
             mtime = stat.st_mtime
             size = stat.st_size
             
@@ -126,7 +125,8 @@ def read_data(csv_path: str | Path | None = None) -> Tuple[List[str], Dict[str, 
     except Exception as e:
         print(f"Error reading CSV file: {e}")
         return [], {}, []
-def extract_year_end_data_by_month(csv_data: Tuple[List[str], Dict[str, int], List[List[str]]], month=12) -> List[YearRecord]:
+        
+def to_records(csv_data: Tuple[List[str], Dict[str, int], List[List[str]]]) -> List[Record]:
     """Process market data by converting dates and extracting the target month."""
     headers, index, rows = csv_data
     if not rows:
@@ -135,23 +135,22 @@ def extract_year_end_data_by_month(csv_data: Tuple[List[str], Dict[str, int], Li
     date_idx = index.get('Date')
     value_idx = index.get('Value')
 
-    year_records: Dict[int, YearRecord] = {}
+    records: List[Record] = []
     for row in rows:
         date_str = row[date_idx] if date_idx is not None and date_idx < len(row) else ''
         parsed = _parse_date_fast(date_str)
         if not parsed:
             continue
         year, month_val, day = parsed
-        if month_val != month:
-            continue
 
         value = _to_float(row[value_idx]) if value_idx is not None and value_idx < len(row) else None
-        year_records[year] = YearRecord(date=date_str, year=year, month=month_val, day=day, value=value)
+        record = Record(date=date_str, year=year, month=month_val, day=day, value=value)
+        records.append(record)
 
-    return sorted(year_records.values(), key=lambda r: r.year)
+    return records
 
 
-def extract_year_data_by_mean(csv_data: Tuple[List[str], Dict[str, int], List[List[str]]]) -> List[YearRecord]:
+def extract_year_data_by_mean(csv_data: Tuple[List[str], Dict[str, int], List[List[str]]]) -> List[Record]:
     """Aggregate monthly data into yearly means."""
     headers, index, rows = csv_data
     if not rows:
@@ -174,21 +173,21 @@ def extract_year_data_by_mean(csv_data: Tuple[List[str], Dict[str, int], List[Li
             continue
         year_groups.setdefault(year, []).append(value)
 
-    year_data: List[YearRecord] = []
+    year_data: List[Record] = []
     for year, values in year_groups.items():
         if not values:
             continue
         mean_value = sum(values) / len(values)
-        year_data.append(YearRecord(date=f"{year}-12-31", year=year, month=12, day=31, value=mean_value))
+        year_data.append(Record(date=f"{year}-12-31", year=year, month=12, day=31, value=mean_value))
 
     return sorted(year_data, key=lambda r: r.year)
 
-def compute_annual_change_rate(year_data: List[YearRecord]) -> List[YearRecord]:
+def compute_annual_change_rate(year_data: List[Record]) -> List[Record]:
     """Compute annual change rate for yearly market data."""
     if not year_data:
         return []
 
-    data = sorted(year_data, key=lambda r: r.year)
+    data = sorted(year_data, key=lambda r: (r.year*10000 + r.month*100 + r.day))
     previous_value = None
     for record in data:
         current_value = record.value
@@ -201,13 +200,13 @@ def compute_annual_change_rate(year_data: List[YearRecord]) -> List[YearRecord]:
     return data
 
 
-def filter_data_after_1960(year_data: List[YearRecord]) -> List[YearRecord]:
+def filter_data_after_1960(year_data: List[Record]) -> List[Record]:
     """Filter yearly data to only include years 1960 and after."""
     if not year_data:
         return []
     return [row for row in year_data if row.year >= 1960]
 
-def get_change_rate_by_year(data: List[YearRecord], year: int, default=None):
+def get_change_rate_by_year(data: List[Record], year: int, default=None):
     """Get the change rate for a specific year."""
     if not data:
         return default
@@ -221,7 +220,7 @@ def get_change_rate_by_year(data: List[YearRecord], year: int, default=None):
     return default if value is None else value
 
 
-def get_value_by_year(data: List[YearRecord], year: int, default=None):
+def get_value_by_year(data: List[Record], year: int, default=None):
     if not data:
         return default
 
@@ -234,7 +233,7 @@ def get_value_by_year(data: List[YearRecord], year: int, default=None):
 
 
 @lru_cache(maxsize=None)
-def stock_data(code="SP500"):
+def stock_data(code="SP500", per_year=True):
     csv_path = data_path("STOCK", f"{code}.csv")
     pickle_path = data_path("STOCK", f"{csv_path.stem}_processed.pkl")
     
@@ -248,8 +247,13 @@ def stock_data(code="SP500"):
     
     # Process the data
     csv_data = read_data(csv_path=csv_path)
-    year_data = extract_year_end_data_by_month(csv_data, month=12)
-    year_data = compute_annual_change_rate(year_data)
+    records = to_records(csv_data)
+    if per_year:
+        year_records = {}
+        records = {r.year:r for r in records}
+        records = list(records.values())
+
+    records = compute_annual_change_rate(records)
     # year_data = filter_data_after_1960(year_data)
     
     # Save to pickle cache
@@ -259,21 +263,21 @@ def stock_data(code="SP500"):
     # except (pickle.PickleError, IOError):
     #     pass  # Continue even if we can't save the cache
     
-    return year_data
+    return records
 
 @lru_cache(maxsize=None)
 def interest_data():
-    csv_path = data_path("interest.csv")
-    pickle_path = data_path("interest_processed.pkl")
+    csv_path = "data/interest.csv"
+    pickle_path = os.path.splitext(csv_path)[0] + "_processed.pkl"
     
     # Try to load from pickle cache first
-    if pickle_path.exists():
+    if os.path.exists(pickle_path):
         try:
-            with pickle_path.open('rb') as f:
+            with open(pickle_path, 'rb') as f:
                 return pickle.load(f)
         except (pickle.PickleError, EOFError, FileNotFoundError):
             pass  # Fall through to recompute if pickle is corrupted
-
+    
     # Process the data
     csv_data = read_data(csv_path=csv_path)
     year_data = extract_year_data_by_mean(csv_data)
@@ -285,7 +289,7 @@ def interest_data():
     
     # Save to pickle cache
     try:
-        with pickle_path.open('wb') as f:
+        with open(pickle_path, 'wb') as f:
             pickle.dump(year_data, f)
     except (pickle.PickleError, IOError):
         pass  # Continue even if we can't save the cache
@@ -294,20 +298,21 @@ def interest_data():
 
 @lru_cache(maxsize=None)
 def inflation_data():
-    csv_path = data_path("inflation.csv")
-    pickle_path = data_path("inflation_processed.pkl")
+    csv_path = "data/inflation.csv"
+    pickle_path = os.path.splitext(csv_path)[0] + "_processed.pkl"
     
     # Try to load from pickle cache first
-    if pickle_path.exists():
+    if os.path.exists(pickle_path):
         try:
-            with pickle_path.open('rb') as f:
+            with open(pickle_path, 'rb') as f:
                 return pickle.load(f)
         except (pickle.PickleError, EOFError, FileNotFoundError):
             pass  # Fall through to recompute if pickle is corrupted
-
+    
     # Process the data
     csv_data = read_data(csv_path=csv_path)
-    year_data = extract_year_end_data_by_month(csv_data, month=12)
+    records = to_records(csv_data)
+    year_data = [r for r in records if r.month == 12]
     year_data = compute_annual_change_rate(year_data)
     for row in year_data:
         if row.value is not None:
@@ -315,14 +320,14 @@ def inflation_data():
     
     # Save to pickle cache
     try:
-        with pickle_path.open('wb') as f:
+        with open(pickle_path, 'wb') as f:
             pickle.dump(year_data, f)
     except (pickle.PickleError, IOError):
         pass  # Continue even if we can't save the cache
     
     return year_data
 
-@file_cache(data_path("portfolio.csv"))
+@file_cache("data/portfolio.csv")
 def portfolio_data() -> Dict[str, float]:
     """
     Read portfolio allocation data from CSV file.
@@ -330,7 +335,7 @@ def portfolio_data() -> Dict[str, float]:
     Returns:
         Dict[str, float]: Dictionary mapping asset codes to their allocation ratios
     """
-    csv_path = data_path("portfolio.csv")
+    csv_path = "data/portfolio.csv"
     headers, index, rows = read_data(csv_path=csv_path)
     if not rows:
         return {}
@@ -345,6 +350,7 @@ def portfolio_data() -> Dict[str, float]:
         ratios.append(value if value is not None else 0.0)
 
     portfolio_data = dict(zip(codes, ratios))
+    print(portfolio_data)
     return portfolio_data
 
 @lru_cache()
@@ -356,16 +362,7 @@ def inflation_rate_multiplier(year, start_year, default=0.00):
         return cpi * inflation_rate_multiplier(year-1, start_year, default=default)
 
 if __name__ == "__main__":
-    # gui_data(interest_data())
-    # print(interest_data())
-    # print(get_change_rate_by_year(2010))
-    import time
-    t0 = time.time()
-    print(inflation_rate_multiplier(2025, 1995))
-    t1 = time.time()
-    print(f"Time taken: {t1 - t0:.6f} seconds")
-    
-    t0 = time.time()
-    print(inflation_rate_multiplier(2021, 1995))
-    t1 = time.time()
-    print(f"Time taken: {t1 - t0:.6f} seconds")
+    from .utils import print_table
+    import sys
+    code = sys.argv[1] if len(sys.argv) > 1 else "GLDM"
+    print_table(stock_data(code, per_year=True), formats={"change_rate":".2%"})

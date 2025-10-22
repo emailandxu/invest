@@ -17,6 +17,8 @@ dependencies = [
 
 [project.gui-scripts]
 invest-gui = "invest:main"
+invest-analysis = "invest:analysis"
+invest-download = "invest:download_data"
 
 [tool.setuptools]
 packages = ["invest"]

@@ -32,11 +32,11 @@ def parse_account(account_hist_xml: str):
         except (TypeError, ValueError):
             continue
         rows.append({
-            'date': _format_date(date_raw),
-            'total_usd': total_usd,
+            'Date': _format_date(date_raw),
+            'Value': total_usd,
         })
 
-    rows.sort(key=lambda r: r['date'])
+    rows.sort(key=lambda r: r['Date'])
 
     return rows
 
@@ -81,12 +81,12 @@ def load_rows_from_csv(csv_path: str | Path) -> List[Dict[str, Any]]:
             for key, value in row.items():
                 if value is None:
                     normalized[key] = ""
-                elif key == "date":
+                elif key == "Date":
                     normalized[key] = value.strip()
                 else:
                     normalized[key] = _coerce_value(value)
             rows.append(normalized)
-    rows.sort(key=lambda r: r.get("date", ""))
+    rows.sort(key=lambda r: r.get("Date", ""))
     return rows
 
 def add_analysis(rows):
@@ -104,7 +104,7 @@ def add_analysis(rows):
     enriched = []
     prev_total_usd = None
     for r in rows:
-        total_usd = r.get('total_usd')
+        total_usd = r.get('Value')
 
         if isinstance(total_usd, (int, float)) and prev_total_usd is not None:
             delta_usd = total_usd - prev_total_usd
@@ -117,7 +117,7 @@ def add_analysis(rows):
             change_rate_pct = ''
 
         enriched.append({
-            'date': r.get('date'),
+            'date': r.get('Date'),
             'total_usd': total_usd,
             'delta_usd': delta_usd,
             'total_cny': USD(total_usd) if total_usd else total_usd,
@@ -130,40 +130,62 @@ def add_analysis(rows):
 
     return enriched
 
-if __name__ == "__main__":
+def cli_parser():
     parser = argparse.ArgumentParser(description="Analyze IBKR reports and export to CSV.")
+    parser.add_argument(
+        "--code-list", 
+        action="store_true", 
+        help="List available stock codes in data/STOCK."
+    )
+    
+    parser.add_argument(
+        "--code",
+        "-c",
+        help="Stock code to download (e.g., VBTLX).",
+    )
     parser.add_argument(
         "--file",
         default=str(data_path("ibkr", "primary.csv")),
         help="Path to a CSV file previously exported via this script.",
     )
-    parser.add_argument(
-        "--to-csv",
-        help="Optional path to save the computed rows to a CSV file.",
-    )
-    parser.add_argument(
-        "--to-csv-analysis",
-        help="Add analysis columns (delta, change rate) to the output.",
-    )
+    
     parser.add_argument(
         "--print",
+        "-p",
         type=int,
         help="print how many rows of the table to stdout after processing.",
-        default=0,
+        default=10,
     )
 
     parser.add_argument(
         "--analysis",
+        "-a",
         action="store_true",
         help="Do analysis.",
     )
 
     args = parser.parse_args()
+    return args
 
-    if args.file.endswith('.csv'):
+def analysis(args=None):
+    if args is None:
+        args = cli_parser()
+        
+    if args.code_list:
+        stock_dir = data_path("STOCK")
+        codes = [p.stem for p in stock_dir.glob("*.csv")]
+        print("Available stock codes:")
+        for code in codes:
+            print(f" - {code}")
+        return
+
+    if args.code:
+        rows = load_rows_from_csv(data_path("STOCK", f"{args.code}.csv"))
+    elif args.file.endswith('.csv'):
         rows = load_rows_from_csv(args.file)
     elif args.file.endswith('.xml'):
         rows = parse_account(args.file)
+        save_rows_to_csv(rows, str(data_path("ibkr", "primary.csv")))
     else:
         raise ValueError("Input file must be .csv or .xml")
     
@@ -172,18 +194,14 @@ if __name__ == "__main__":
     if args.analysis:
         rows = add_analysis(rows)
 
-    if args.to_csv:
-        save_rows_to_csv(rows, args.to_csv)
-
-    if args.to_csv_analysis:
-        analysis_rows = add_analysis(rows)
-        save_rows_to_csv(analysis_rows, args.to_csv_analysis)
-
     if rows and args.print != 0:
         assert len(rows) >= args.print, f"Not enough rows to print, maximum {len(rows)}."
         formats = {col:".2%" for col in columns_name_of_rows(rows) if "pct" in col.lower() or "percent" in col.lower()}
 
         print_table(rows[-args.print:], formats)
 
-        print("\nsummary:")
+        print("\nSummary:")
         print_table(add_analysis([original_rows[-args.print]] + [original_rows[-1]]), formats)
+        
+if __name__ == "__main__":
+    analysis()
