@@ -12,6 +12,7 @@ dependencies = [
     "numpy>=1.24",
     "pyqt5>=5.15",
     "pyqtgraph>=0.13",
+    "tqdm>=4.67.1",
     "yfinance>=0.2",
 ]
 
@@ -19,6 +20,7 @@ dependencies = [
 invest-gui = "invest:main"
 invest-analysis = "invest:analysis"
 invest-download = "invest:download_data"
+invest-analysis-gui = "invest.analysis_gui:main"
 
 [tool.setuptools]
 packages = ["invest"]

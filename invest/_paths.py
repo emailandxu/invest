@@ -14,5 +14,4 @@ def package_root() -> Path:
 def data_path(*relative: str) -> Path:
     """Return an absolute path inside the bundled data directory."""
     path = DATA_DIR.joinpath(*relative)
-    print(path)
     return path
