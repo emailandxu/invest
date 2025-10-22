@@ -67,7 +67,7 @@ def invest(year, max_year, new_savings, interest_rate, withdraw_rate, total=0, i
     return results
 
 if __name__ == "__main__":
-    from utils import print_table, USD
+    from .utils import print_table, USD
     print_table(invest(year=1995, max_year=1995 + 25, new_savings=3, 
                       interest_rate=0.04, 
                       withdraw_rate=lambda year, total: ((0.04 * 30) / total) * (1 + 0.02) ** (year - 1995)))

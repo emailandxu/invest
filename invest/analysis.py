@@ -1,10 +1,11 @@
 import argparse
 import csv
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List
 
-from utils import USD, print_table, columns_name_of_rows
-import xml.etree.ElementTree as ET
+from ._paths import data_path
+from .utils import USD, print_table, columns_name_of_rows
 
 def _format_date(yyyymmdd: str) -> str:
     if len(yyyymmdd) == 8 and yyyymmdd.isdigit():
@@ -133,7 +134,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Analyze IBKR reports and export to CSV.")
     parser.add_argument(
         "--file",
-        default="data/ibkr/primary_last_365.csv",
+        default=str(data_path("ibkr", "primary.csv")),
         help="Path to a CSV file previously exported via this script.",
     )
     parser.add_argument(
@@ -166,6 +167,8 @@ if __name__ == "__main__":
     else:
         raise ValueError("Input file must be .csv or .xml")
     
+    original_rows = rows.copy()
+
     if args.analysis:
         rows = add_analysis(rows)
 
@@ -181,3 +184,6 @@ if __name__ == "__main__":
         formats = {col:".2%" for col in columns_name_of_rows(rows) if "pct" in col.lower() or "percent" in col.lower()}
 
         print_table(rows[-args.print:], formats)
+
+        print("\nsummary:")
+        print_table(add_analysis([original_rows[-args.print]] + [original_rows[-1]]), formats)

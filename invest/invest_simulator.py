@@ -1,9 +1,19 @@
 from dataclasses import dataclass, asdict, field
 from typing import Dict
-from utils import USD
+
 import numpy as np
-from read_data import get_change_rate_by_year, get_value_by_year, stock_data, portfolio_data, interest_data, inflation_data, inflation_rate_multiplier
-from invest import invest
+
+from .utils import USD
+from .read_data import (
+    get_change_rate_by_year,
+    get_value_by_year,
+    stock_data,
+    portfolio_data,
+    interest_data,
+    inflation_data,
+    inflation_rate_multiplier,
+)
+from .invest import invest
 @dataclass
 class InvestmentParams:
     """Data class representing investment simulation parameters."""

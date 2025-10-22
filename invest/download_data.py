@@ -1,7 +1,10 @@
 # save_vbtlx.py
-import yfinance as yf
-import datetime
 import argparse
+import datetime
+
+import yfinance as yf
+
+from ._paths import ensure_data_dir
 
 # 创建 ArgumentParser 对象
 parser = argparse.ArgumentParser(description="Download stock data from Yahoo Finance and save to CSV.")
@@ -27,10 +30,7 @@ the_df = df[['Close']].copy()
 the_df.columns = ['Value']
 the_df.index.name = 'Date'
 
-# 保存为 CSV
-out ="data/STOCK/{}.csv".format(CODE)
-the_df.to_csv(out)
-print(f"Saved {len(the_df)} rows to {out}")
-out ="data/STOCK/{}.csv".format(CODE)
+stock_dir = ensure_data_dir("STOCK")
+out = stock_dir / f"{CODE}.csv"
 the_df.to_csv(out)
 print(f"Saved {len(the_df)} rows to {out}")

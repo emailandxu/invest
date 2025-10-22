@@ -1,9 +1,11 @@
 import csv
-import os
 import pickle
 from dataclasses import dataclass
 from functools import lru_cache, reduce, wraps
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+from ._paths import data_path
 
 
 @dataclass
@@ -25,18 +27,20 @@ def file_cache(filepath):
     Returns:
         Decorator function
     """
+    path = Path(filepath)
+
     def decorator(func):
         cache = {}
         
         @wraps(func)
         def wrapper(*args, **kwargs):
             # Check if file exists
-            if not os.path.exists(filepath):
+            if not path.exists():
                 # If file doesn't exist, always call function
                 return func(*args, **kwargs)
             
             # Get file modification time and size for quick check
-            stat = os.stat(filepath)
+            stat = path.stat()
             mtime = stat.st_mtime
             size = stat.st_size
             
@@ -96,10 +100,11 @@ def _to_float(value: Optional[str]) -> Optional[float]:
         return None
 
 
-def read_data(csv_path='data/sp500.csv') -> Tuple[List[str], Dict[str, int], List[List[str]]]:
+def read_data(csv_path: str | Path | None = None) -> Tuple[List[str], Dict[str, int], List[List[str]]]:
     """Read CSV data and return headers, header index, and raw rows."""
+    path = Path(csv_path) if csv_path is not None else data_path("sp500.csv")
     try:
-        with open(csv_path, 'r', newline='', encoding='utf-8-sig') as csvfile:
+        with path.open('r', newline='', encoding='utf-8-sig') as csvfile:
             reader = csv.reader(csvfile)
             headers = next(reader, None)
             if headers is None:
@@ -116,7 +121,7 @@ def read_data(csv_path='data/sp500.csv') -> Tuple[List[str], Dict[str, int], Lis
 
         return headers, header_index, rows
     except FileNotFoundError:
-        print(f"Error: Could not find file {csv_path}")
+        print(f"Error: Could not find file {path}")
         return [], {}, []
     except Exception as e:
         print(f"Error reading CSV file: {e}")
@@ -230,8 +235,8 @@ def get_value_by_year(data: List[YearRecord], year: int, default=None):
 
 @lru_cache(maxsize=None)
 def stock_data(code="SP500"):
-    csv_path = "data/STOCK/{}.csv".format(code)
-    pickle_path = os.path.splitext(csv_path)[0] + "_processed.pkl"
+    csv_path = data_path("STOCK", f"{code}.csv")
+    pickle_path = data_path("STOCK", f"{csv_path.stem}_processed.pkl")
     
     # Try to load from pickle cache first
     # if os.path.exists(pickle_path):
@@ -258,17 +263,17 @@ def stock_data(code="SP500"):
 
 @lru_cache(maxsize=None)
 def interest_data():
-    csv_path = "data/interest.csv"
-    pickle_path = os.path.splitext(csv_path)[0] + "_processed.pkl"
+    csv_path = data_path("interest.csv")
+    pickle_path = data_path("interest_processed.pkl")
     
     # Try to load from pickle cache first
-    if os.path.exists(pickle_path):
+    if pickle_path.exists():
         try:
-            with open(pickle_path, 'rb') as f:
+            with pickle_path.open('rb') as f:
                 return pickle.load(f)
         except (pickle.PickleError, EOFError, FileNotFoundError):
             pass  # Fall through to recompute if pickle is corrupted
-    
+
     # Process the data
     csv_data = read_data(csv_path=csv_path)
     year_data = extract_year_data_by_mean(csv_data)
@@ -280,7 +285,7 @@ def interest_data():
     
     # Save to pickle cache
     try:
-        with open(pickle_path, 'wb') as f:
+        with pickle_path.open('wb') as f:
             pickle.dump(year_data, f)
     except (pickle.PickleError, IOError):
         pass  # Continue even if we can't save the cache
@@ -289,17 +294,17 @@ def interest_data():
 
 @lru_cache(maxsize=None)
 def inflation_data():
-    csv_path = "data/inflation.csv"
-    pickle_path = os.path.splitext(csv_path)[0] + "_processed.pkl"
+    csv_path = data_path("inflation.csv")
+    pickle_path = data_path("inflation_processed.pkl")
     
     # Try to load from pickle cache first
-    if os.path.exists(pickle_path):
+    if pickle_path.exists():
         try:
-            with open(pickle_path, 'rb') as f:
+            with pickle_path.open('rb') as f:
                 return pickle.load(f)
         except (pickle.PickleError, EOFError, FileNotFoundError):
             pass  # Fall through to recompute if pickle is corrupted
-    
+
     # Process the data
     csv_data = read_data(csv_path=csv_path)
     year_data = extract_year_end_data_by_month(csv_data, month=12)
@@ -310,14 +315,14 @@ def inflation_data():
     
     # Save to pickle cache
     try:
-        with open(pickle_path, 'wb') as f:
+        with pickle_path.open('wb') as f:
             pickle.dump(year_data, f)
     except (pickle.PickleError, IOError):
         pass  # Continue even if we can't save the cache
     
     return year_data
 
-@file_cache("data/portfolio.csv")
+@file_cache(data_path("portfolio.csv"))
 def portfolio_data() -> Dict[str, float]:
     """
     Read portfolio allocation data from CSV file.
@@ -325,7 +330,7 @@ def portfolio_data() -> Dict[str, float]:
     Returns:
         Dict[str, float]: Dictionary mapping asset codes to their allocation ratios
     """
-    csv_path = "data/portfolio.csv"
+    csv_path = data_path("portfolio.csv")
     headers, index, rows = read_data(csv_path=csv_path)
     if not rows:
         return {}
@@ -340,7 +345,6 @@ def portfolio_data() -> Dict[str, float]:
         ratios.append(value if value is not None else 0.0)
 
     portfolio_data = dict(zip(codes, ratios))
-    print(portfolio_data)
     return portfolio_data
 
 @lru_cache()

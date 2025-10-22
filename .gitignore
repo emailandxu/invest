@@ -28,5 +28,7 @@ Thumbs.db
 # ._ files
 ._*
 
-data/STOCK/*
-data/ibkr/*
+invest/data/STOCK/*
+invest/data/ibkr/*
+
+cpp/*

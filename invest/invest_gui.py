@@ -1,4 +1,3 @@
-import os
 import sys
 from functools import lru_cache, reduce
 
@@ -9,10 +8,18 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                             QHBoxLayout, QGridLayout, QLabel, QSlider, 
                             QCheckBox, QPushButton, QTextEdit, QComboBox)
 
-from invest import invest
-from invest_simulator import InvestmentParams, StrategyBasic, InvestmentYearsResult
-from read_data import get_change_rate_by_year, get_value_by_year, stock_data, portfolio_data, interest_data, inflation_data, inflation_rate_multiplier
-from utils import USD
+from .invest_simulator import InvestmentParams, StrategyBasic, InvestmentYearsResult
+from .read_data import (
+    get_change_rate_by_year,
+    get_value_by_year,
+    stock_data,
+    portfolio_data,
+    interest_data,
+    inflation_data,
+    inflation_rate_multiplier,
+)
+from .utils import USD
+from ._paths import data_path
 
 def get_strategy(params:InvestmentParams):
     strategy = StrategyBasic.from_params(params)
@@ -259,8 +266,10 @@ class InvestmentControlPanel(QWidget):
         grid_layout.addWidget(self.new_savings_label, row, 1)
         row += 1
 
-        # self.asset_code_combo.addItems(["portfolio", "COKE", "BRKB"])
-        asset_codes = [path.split(".")[0].strip() for path in os.listdir("data/STOCK") if path.endswith(".csv")]
+        stock_dir = data_path("STOCK")
+        asset_codes = []
+        if stock_dir.exists():
+            asset_codes = sorted(p.stem for p in stock_dir.glob("*.csv"))
         asset_codes = ["portfolio"] + [c for c in asset_codes if c]
         
         # Stock Code Selection
@@ -721,8 +730,13 @@ class InvestmentSimulatorGui(QMainWindow):
         window.show()
         app.exec_()
 
+def main(args=None):
+    """Launch the Investment Simulator GUI."""
+    InvestmentSimulatorGui.main(args)
+
+
 if __name__ == "__main__":
-    InvestmentSimulatorGui.main()
+    main()
     # import cProfile
     # import pstats
     # import io

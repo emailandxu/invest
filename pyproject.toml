@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "invest"
 version = "0.1.0"
@@ -11,5 +15,17 @@ dependencies = [
     "yfinance>=0.2",
 ]
 
+[project.gui-scripts]
+invest-gui = "invest:main"
+
+[tool.setuptools]
+packages = ["invest"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+invest = [
+    "data/**/*",
+]
+
 [tool.uv]
-package = false
+package = true
