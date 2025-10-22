@@ -143,6 +143,14 @@ def cli_parser():
         "-c",
         help="Stock code to download (e.g., VBTLX).",
     )
+    
+    parser.add_argument(
+        "--update",
+        "-u",
+        action="store_true",
+        help="Update stock data before analysis.",
+    )
+    
     parser.add_argument(
         "--file",
         default=str(data_path("ibkr", "primary.csv")),
@@ -178,8 +186,10 @@ def analysis(args=None):
         for code in codes:
             print(f" - {code}")
         return
-
     if args.code:
+        if args.update:
+            from .download_data import download_data
+            download_data(args)
         rows = load_rows_from_csv(data_path("STOCK", f"{args.code}.csv"))
     elif args.file.endswith('.csv'):
         rows = load_rows_from_csv(args.file)
