@@ -51,7 +51,8 @@ def _download_data(args):
         existing_df = pd.read_csv(out, index_col='Date')
         existing_df.index = pd.to_datetime(existing_df.index)
         the_df.index = pd.to_datetime(the_df.index)
-        # Merge the existing data with the new data, preferring the new data
+        # fill the_df by the missing dates from existing_df
+        # so that the new data takes precedence
         merged_df = the_df.combine_first(existing_df)
         merged_df = merged_df.sort_index()
         merged_df.to_csv(out)
