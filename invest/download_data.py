@@ -14,7 +14,8 @@ def cli_parser():
     parser.add_argument("--code", help="Stock code to download (e.g., VTSAX)")
     parser.add_argument("--start", default="1970-01-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", default=datetime.date.today().isoformat(), help="End date (YYYY-MM-DD)")
-    parser.add_argument("--update", action="store_true", help="Update existing stock CSVs under data/STOCK")
+    parser.add_argument("--update", action="store_true", help="Update existing stock CSV")
+    parser.add_argument("--update_all", action="store_true", help="Update existing stock CSVs under data/STOCK")
     # 解析命令行参数
     args = parser.parse_args()
     return args
@@ -23,8 +24,10 @@ def download_data(args=None):
     if args is None:
         args = cli_parser()
 
-    if args.update:
-        update_exists()
+    if hasattr(args, "update_all") and args.update_all:
+        update_all()
+    if hasattr(args, "update") and args.update:
+        update_code(args.code)
     else:
         _download_data(args)
 
@@ -48,9 +51,8 @@ def _download_data(args):
         existing_df = pd.read_csv(out, index_col='Date')
         existing_df.index = pd.to_datetime(existing_df.index)
         the_df.index = pd.to_datetime(the_df.index)
-        
         # Merge the existing data with the new data, preferring the new data
-        merged_df = existing_df.combine_first(the_df)
+        merged_df = the_df.combine_first(existing_df)
         merged_df = merged_df.sort_index()
         merged_df.to_csv(out)
         print(f"Merged {len(the_df)} rows with existing data and saved to {out}")
@@ -59,7 +61,7 @@ def _download_data(args):
         the_df.to_csv(out)
         print(f"Saved {len(the_df)} rows to {out}")
 
-def update_exists():
+def update_all():
     """Update all existing stock CSVs under data/STOCK using download_data.
 
     Strategy:
@@ -75,42 +77,48 @@ def update_exists():
     stock_dir = data_path("STOCK")
     stock_dir.mkdir(parents=True, exist_ok=True)
 
-    today = datetime.date.today().isoformat()
 
     updated = 0
     for csv_path in tqdm(sorted(stock_dir.glob("*.csv"))):
         if csv_path.name.startswith("."):
             continue  # skip hidden files
-        code = csv_path.stem
-        start = "1970-01-01"
-        try:
-            df = pd.read_csv(csv_path, index_col='Date')
-            if not df.empty:
-                # ensure datetime index
-                df.index = pd.to_datetime(df.index, errors='coerce')
-                last = df.index.max()
-                if pd.notna(last):
-                    start = (last + pd.Timedelta(days=1)).date().isoformat()
-        except Exception:
-            # keep default start
-            pass
-
-        # Construct args-like object
-        class Args:
-            pass
-        args = Args()
-        args.code = code
-        args.start = start
-        args.end = today
-
-        print(f"Updating {code}: {start} → {today}")
-        try:
-            _download_data(args)
-            updated += 1
-        except Exception as e:
-            print(f"Failed to update {code}: {e}")
-
+        
+        update_code(csv_path.stem)
+        updated += 1
     print(f"Updated {updated} tickers under {stock_dir}")
+
+
+def update_code(code):
+    start = "1970-01-01"
+    today = datetime.date.today().isoformat()
+    try:
+        df = pd.read_csv(data_path("STOCK", code + ".csv"), index_col='Date')
+        if not df.empty:
+            # ensure datetime index
+            df.index = pd.to_datetime(df.index, errors='coerce')
+            last = df.index.max()
+            if pd.notna(last):
+                # start = (last + pd.Timedelta(days=1)).date().isoformat()
+                start = last.date().isoformat()
+    except Exception as e:
+        # keep default start
+        print(e)
+        pass
+
+    # Construct args-like object
+    class Args:
+        pass
+    args = Args()
+    args.code = code
+    args.start = start
+    args.end = today
+
+    print(f"Updating {code}: {start} → {today}")
+    try:
+        _download_data(args)
+    except Exception as e:
+        print(f"Failed to update {code}: {e}")
+
 
 if __name__ == "__main__":
     download_data()
