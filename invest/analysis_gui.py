@@ -221,7 +221,7 @@ class AnalysisPlotPanel(QWidget):
 
         r = daily_change_rate(y)
         pen2 = pg.mkPen(color=color, width=1)
-        self.plot_change.plot(x, r, pen=pen2, name=f"{label} Δ")
+        self.plot_change.plot(x, r, pen=pen2, name=f"{label} : {r.std():.2%}")
         try:
             rmin = float(np.nanmin(r))
             rmax = float(np.nanmax(r))
@@ -302,6 +302,7 @@ class AnalysisControlPanel(QWidget):
         dates_grid.addWidget(QLabel("End Date:"), dates_row, 0)
         self.edit_end = QDateEdit(calendarPopup=True)
         self.edit_end.dateChanged.connect(self._queue_update)
+        self.edit_end.setDate(QDate.currentDate())
         dates_grid.addWidget(self.edit_end, dates_row, 1); dates_row += 1
         layout.addLayout(dates_grid)
 
@@ -403,8 +404,6 @@ class AnalysisControlPanel(QWidget):
                 self.edit_end.setDate(self._max_date)
             elif self.edit_end.date() < self._min_date:
                 # If current end is outside low bound (e.g., default far in past), move to today/max
-                self.edit_end.setDate(desired_end)
-            else:
                 self.edit_end.setDate(desired_end)
 
     def _reload_codes(self):
@@ -578,7 +577,7 @@ class AnalysisGui(QMainWindow):
             pen = None
             pen2 = None
         self.plot_panel.plot_value.plot(common_x, V, pen=pen, name="Weighted")
-        self.plot_panel.plot_change.plot(common_x, weighted_r, pen=pen2, name="Weighted Δ")
+        self.plot_panel.plot_change.plot(common_x, weighted_r, pen=pen2, name=f"Weighted: {weighted_r.std():.2%}")
         try:
             rmin = float(np.nanmin(weighted_r))
             rmax = float(np.nanmax(weighted_r))
