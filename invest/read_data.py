@@ -267,7 +267,7 @@ def stock_data(code="SP500", per_year=True):
 
 @lru_cache(maxsize=None)
 def interest_data():
-    csv_path = "data/interest.csv"
+    csv_path = data_path("interest.csv")
     pickle_path = os.path.splitext(csv_path)[0] + "_processed.pkl"
     
     # Try to load from pickle cache first
@@ -298,7 +298,7 @@ def interest_data():
 
 @lru_cache(maxsize=None)
 def inflation_data():
-    csv_path = "data/inflation.csv"
+    csv_path = data_path("inflation.csv")
     pickle_path = os.path.splitext(csv_path)[0] + "_processed.pkl"
     
     # Try to load from pickle cache first
@@ -327,7 +327,7 @@ def inflation_data():
     
     return year_data
 
-@file_cache("data/portfolio.csv")
+@file_cache(data_path("portfolio.csv"))
 def portfolio_data() -> Dict[str, float]:
     """
     Read portfolio allocation data from CSV file.
@@ -335,7 +335,7 @@ def portfolio_data() -> Dict[str, float]:
     Returns:
         Dict[str, float]: Dictionary mapping asset codes to their allocation ratios
     """
-    csv_path = "data/portfolio.csv"
+    csv_path = data_path("portfolio.csv")
     headers, index, rows = read_data(csv_path=csv_path)
     if not rows:
         return {}
