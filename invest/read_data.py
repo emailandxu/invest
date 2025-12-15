@@ -361,6 +361,131 @@ def inflation_rate_multiplier(year, start_year, default=0.00):
     else:
         return cpi * inflation_rate_multiplier(year-1, start_year, default=default)
 
+
+def get_inflation_multiplier_for_date(start_date, target_date, default_rate=0.03):
+    """
+    Calculate cumulative inflation multiplier from start_date to target_date.
+    Uses annual inflation rates with linear interpolation within years.
+    
+    Args:
+        start_date: Start date (baseline, multiplier = 1.0)
+        target_date: Target date to calculate multiplier for
+        default_rate: Default annual inflation rate if data unavailable
+    
+    Returns:
+        float: Cumulative inflation multiplier (e.g., 1.05 = 5% cumulative inflation)
+    """
+    from datetime import date
+    
+    if isinstance(start_date, str):
+        start_date = date.fromisoformat(start_date)
+    if isinstance(target_date, str):
+        target_date = date.fromisoformat(target_date)
+    
+    if target_date <= start_date:
+        return 1.0
+    
+    # Get inflation data
+    inf_data = inflation_data()
+    inf_by_year = {r.year: r.value for r in inf_data if r.value is not None}
+    
+    multiplier = 1.0
+    current_year = start_date.year
+    end_year = target_date.year
+    
+    # For each complete year between start and end
+    for year in range(current_year, end_year + 1):
+        annual_rate = inf_by_year.get(year, default_rate)
+        
+        if year == current_year == end_year:
+            # Same year: partial
+            days_in_year = 366 if (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)) else 365
+            days_elapsed = (target_date - start_date).days
+            partial_rate = annual_rate * (days_elapsed / days_in_year)
+            multiplier *= (1 + partial_rate)
+        elif year == current_year:
+            # First year: from start_date to end of year
+            year_end = date(year, 12, 31)
+            days_in_year = 366 if (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)) else 365
+            days_elapsed = (year_end - start_date).days
+            partial_rate = annual_rate * (days_elapsed / days_in_year)
+            multiplier *= (1 + partial_rate)
+        elif year == end_year:
+            # Last year: from start of year to target_date
+            year_start = date(year, 1, 1)
+            days_in_year = 366 if (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)) else 365
+            days_elapsed = (target_date - year_start).days
+            partial_rate = annual_rate * (days_elapsed / days_in_year)
+            multiplier *= (1 + partial_rate)
+        else:
+            # Complete year
+            multiplier *= (1 + annual_rate)
+    
+    return multiplier
+
+
+def stock_data_daily(code: str = "VTI"):
+    """
+    Load daily stock data as Bar objects for backtesting.
+    
+    Returns a list of Bar dataclass with date, open, high, low, close, volume.
+    Since source data only has close price, OHLC all use the close value.
+    
+    Args:
+        code: Stock symbol (e.g., "VTI", "SP500")
+    
+    Returns:
+        List of Bar objects sorted by date
+    """
+    from datetime import datetime as dt
+    from .backtest import Bar
+    
+    csv_path = data_path("STOCK", f"{code}.csv")
+    headers, index, rows = read_data(csv_path=csv_path)
+    
+    if not rows:
+        return []
+    
+    date_idx = index.get('Date')
+    value_idx = index.get('Value')
+    
+    if date_idx is None or value_idx is None:
+        return []
+    
+    bars = []
+    for row in rows:
+        date_str = row[date_idx] if date_idx < len(row) else ''
+        parsed = _parse_date_fast(date_str)
+        if not parsed:
+            continue
+        
+        year, month, day = parsed
+        try:
+            bar_date = dt(year, month, day).date()
+        except ValueError:
+            continue
+        
+        value = _to_float(row[value_idx]) if value_idx < len(row) else None
+        if value is None:
+            continue
+        
+        # Create Bar with same value for OHLC since we only have close price
+        bar = Bar(
+            symbol=code,
+            date=bar_date,
+            open=value,
+            high=value,
+            low=value,
+            close=value,
+            volume=0.0
+        )
+        bars.append(bar)
+    
+    # Sort by date
+    bars.sort(key=lambda b: b.date)
+    return bars
+
+
 if __name__ == "__main__":
     from .utils import print_table
     import sys
