@@ -43,12 +43,10 @@ class BuyAndHoldStrategy(Strategy):
         self.allocation = allocation
     
     def on_init(self, context: BacktestContext) -> None:
-        context.set_state("initialized", False)
+        context.set_state("initialized_symbols", [])
     
     def on_bar(self, context: BacktestContext, bars: Dict[str, Bar]) -> None:
-        if context.get_state("initialized"):
-            return
-        
+        initialized_symbols = context.get_state("initialized_symbols", [])
         # Calculate allocation
         if self.allocation:
             alloc = self.allocation
@@ -58,12 +56,25 @@ class BuyAndHoldStrategy(Strategy):
             alloc = {s: 1.0 / n for s in context.symbols}
         
         # Buy according to allocation
-        for symbol in context.symbols:
+        updated_initialized = False
+        for symbol, weight in alloc.items():
+            if symbol in initialized_symbols:
+                continue
+            
             if symbol in bars:
-                target_pct = alloc.get(symbol, 0)
-                context.target_percent(symbol, target_pct)
+                # Buy based on INITIAL capital to preserve strict buy-and-hold ratios
+                # regardless of current portfolio value (drifting).
+                target_value = context.initial_capital * weight
+                price = bars[symbol].close
+                
+                if price > 0:
+                    quantity = target_value / price
+                    context.buy(symbol, quantity)
+                    initialized_symbols.append(symbol)
+                    updated_initialized = True
         
-        context.set_state("initialized", True)
+        if updated_initialized:
+            context.set_state("initialized_symbols", initialized_symbols)
 
 
 @register_strategy
@@ -82,14 +93,16 @@ class MovingAverageCrossoverStrategy(Strategy):
         StrategyParameter("long_period", "Long MA Period", "int", 50, 10, 300, 10),
     ]
     
-    def __init__(self, short_period: int = 20, long_period: int = 50):
+    def __init__(self, short_period: int = 20, long_period: int = 50, allocation: Dict[str, float] = None):
         """
         Args:
             short_period: Period for short moving average (default: 20)
             long_period: Period for long moving average (default: 50)
+            allocation: Optional dict mapping symbol to target weight
         """
         self.short_period = short_period
         self.long_period = long_period
+        self.allocation = allocation
     
     def on_init(self, context: BacktestContext) -> None:
         # Track previous MA relationship for crossover detection
@@ -104,11 +117,18 @@ class MovingAverageCrossoverStrategy(Strategy):
     def on_bar(self, context: BacktestContext, bars: Dict[str, Bar]) -> None:
         prev_above = context.get_state("prev_above")
         n_symbols = len([s for s in context.symbols if s in bars])
+        
+        # Calculate target allocation
         target_per_symbol = 1.0 / n_symbols if n_symbols > 0 else 0
         
         for symbol in context.symbols:
             if symbol not in bars:
                 continue
+            
+            # Determine target weight for this symbol
+            weight = target_per_symbol
+            if self.allocation and symbol in self.allocation:
+                weight = self.allocation[symbol]
             
             closes = context.get_closes(symbol)
             if len(closes) < self.long_period:
@@ -130,7 +150,7 @@ class MovingAverageCrossoverStrategy(Strategy):
                 if currently_above and not was_above:
                     # Golden cross - buy signal
                     if position.quantity == 0:
-                        context.target_percent(symbol, target_per_symbol)
+                        context.target_percent(symbol, weight)
                 elif not currently_above and was_above:
                     # Death cross - sell signal
                     if position.quantity > 0:
@@ -208,18 +228,36 @@ class MomentumStrategy(Strategy):
     parameters = [
         StrategyParameter("lookback", "Lookback Period (Days)", "int", 60, 10, 252, 10),
         StrategyParameter("hold_top_n", "Hold Top N Assets", "int", 1, 1, 10, 1),
+        StrategyParameter("rebalance_period", "Rebalance Period (Days)", "int", 30, 1, 365, 1),
     ]
     
-    def __init__(self, lookback: int = 60, hold_top_n: int = 1):
+    def __init__(self, lookback: int = 60, hold_top_n: int = 1, rebalance_period: int = 30):
         """
         Args:
             lookback: Days to look back for momentum calculation (default: 60)
             hold_top_n: Number of top momentum assets to hold (default: 1)
+            rebalance_period: Days between rebalancing (default: 30)
         """
         self.lookback = lookback
         self.hold_top_n = hold_top_n
+        self.rebalance_period = rebalance_period
     
+    def on_init(self, context: BacktestContext) -> None:
+        context.set_state("rebalance_counter", 0)
+
     def on_bar(self, context: BacktestContext, bars: Dict[str, Bar]) -> None:
+        # Check rebalance period
+        counter = context.get_state("rebalance_counter", 0)
+        counter += 1
+        context.set_state("rebalance_counter", counter)
+        
+        # Only rebalance on specific days (and first day)
+        if counter < self.rebalance_period and counter != 1:
+            return
+            
+        if counter >= self.rebalance_period:
+            context.set_state("rebalance_counter", 0)
+
         # Calculate momentum for each symbol
         momentum_scores = {}
         
@@ -228,11 +266,12 @@ class MomentumStrategy(Strategy):
                 continue
             
             closes = context.get_closes(symbol)
-            if len(closes) < self.lookback:
+            # Need lookback + 1 points to calculate N-day return
+            if len(closes) <= self.lookback:
                 continue
             
             # Momentum = current price / price N days ago - 1
-            past_price = closes[-self.lookback]
+            past_price = closes[-(self.lookback + 1)]
             current_price = closes[-1]
             
             if past_price > 0:
@@ -270,94 +309,6 @@ class MomentumStrategy(Strategy):
 
 
 @register_strategy
-class MomentumWithThresholdStrategy(Strategy):
-    """
-    Improved Momentum Strategy with switching threshold.
-    
-    Only switches to a new asset if its momentum exceeds the current
-    holding by a minimum threshold, reducing whipsaw trading.
-    """
-    
-    name = "Momentum (Threshold)"
-    description = "Momentum with switching threshold to reduce trading frequency"
-    parameters = [
-        StrategyParameter("lookback", "Lookback Period (Days)", "int", 90, 10, 252, 10),
-        StrategyParameter("threshold_pct", "Switch Threshold (%)", "float", 5.0, 0, 50, 1),
-        StrategyParameter("min_hold_days", "Min Hold Days", "int", 20, 0, 60, 5),
-    ]
-    
-    def __init__(self, lookback: int = 90, threshold_pct: float = 5.0, min_hold_days: int = 20):
-        """
-        Args:
-            lookback: Days to look back for momentum calculation
-            threshold_pct: Only switch if new asset momentum exceeds current by this %
-            min_hold_days: Minimum days to hold before considering switch
-        """
-        self.lookback = lookback
-        self.threshold_pct = threshold_pct / 100  # Convert to decimal
-        self.min_hold_days = min_hold_days
-    
-    def on_init(self, context: BacktestContext) -> None:
-        context.set_state("current_holding", None)
-        context.set_state("days_held", 0)
-    
-    def on_bar(self, context: BacktestContext, bars: Dict[str, Bar]) -> None:
-        current_holding = context.get_state("current_holding")
-        days_held = context.get_state("days_held", 0)
-        
-        # Calculate momentum for each symbol
-        momentum_scores = {}
-        for symbol in context.symbols:
-            if symbol not in bars:
-                continue
-            closes = context.get_closes(symbol)
-            if len(closes) < self.lookback:
-                continue
-            past_price = closes[-self.lookback]
-            current_price = closes[-1]
-            if past_price > 0:
-                momentum_scores[symbol] = (current_price / past_price) - 1
-        
-        if not momentum_scores:
-            return
-        
-        # Find best momentum asset
-        best_symbol = max(momentum_scores.keys(), key=lambda s: momentum_scores[s])
-        best_momentum = momentum_scores[best_symbol]
-        
-        # Check if we should switch
-        should_switch = False
-        
-        if current_holding is None:
-            # First time, buy the best
-            should_switch = True
-        elif current_holding not in momentum_scores:
-            # Current holding has no data, switch to best available
-            should_switch = True
-        elif days_held >= self.min_hold_days:
-            # Check threshold
-            current_momentum = momentum_scores.get(current_holding, 0)
-            if best_symbol != current_holding:
-                momentum_diff = best_momentum - current_momentum
-                if momentum_diff > self.threshold_pct:
-                    should_switch = True
-        
-        if should_switch and best_symbol in bars:
-            # Sell current holding
-            if current_holding and current_holding != best_symbol:
-                position = context.get_position(current_holding)
-                if position.quantity > 0:
-                    context.sell_all(current_holding)
-            
-            # Buy new best
-            context.target_percent(best_symbol, 1.0)
-            context.set_state("current_holding", best_symbol)
-            context.set_state("days_held", 0)
-        else:
-            context.set_state("days_held", days_held + 1)
-
-
-@register_strategy
 class DollarCostAverageStrategy(Strategy):
     """
     Dollar Cost Averaging Strategy.
@@ -374,14 +325,17 @@ class DollarCostAverageStrategy(Strategy):
     
     def __init__(self, 
                  amount_per_period: float = 1000.0,
-                 period_days: int = 30):
+                 period_days: int = 30,
+                 allocation: Dict[str, float] = None):
         """
         Args:
             amount_per_period: Dollar amount to invest each period
             period_days: Days between investments
+            allocation: Optional dict mapping symbol to target weight (0-1)
         """
         self.amount_per_period = amount_per_period
         self.period_days = period_days
+        self.allocation = allocation
     
     def on_init(self, context: BacktestContext) -> None:
         context.set_state("days_counter", self.period_days)
@@ -398,6 +352,16 @@ class DollarCostAverageStrategy(Strategy):
     
     def _invest(self, context: BacktestContext, bars: Dict[str, Bar]):
         """Invest the fixed amount across symbols."""
+        # Use provided allocation if available
+        if self.allocation:
+            for symbol, weight in self.allocation.items():
+                if symbol in bars:
+                    amount = self.amount_per_period * weight
+                    if context.cash >= amount:
+                        context.buy_value(symbol, amount)
+            return
+
+        # Default to equal weight if no allocation provided
         available_symbols = [s for s in context.symbols if s in bars]
         if not available_symbols:
             return

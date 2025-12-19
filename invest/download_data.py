@@ -37,8 +37,9 @@ def _download_data(args):
     start = args.start if hasattr(args, 'start') else "2025-10-01"
     end = args.end if hasattr(args, 'end') else datetime.date.today().isoformat()
 
-    # 下载 VBTLX 的历史日线数据
-    df = yf.download(code, start=start, end=end, progress=False)
+    # 下载历史日线数据 - 使用未调整价格 (auto_adjust=False)
+    # 因为分红被单独计算，使用调整价格会导致分红被重复计算
+    df = yf.download(code, start=start, end=end, progress=False, auto_adjust=False)
     # df.loc[:, ('Close','BND')]
     # Create a new dataframe with just the Close price
     the_df = df[['Close']].copy()
@@ -121,6 +122,92 @@ def update_code(code):
         print(f"Failed to update {code}: {e}")
 
 
+def download_dividends(code: str):
+    """Download dividend data for a stock and save to CSV."""
+    try:
+        ticker = yf.Ticker(code)
+        div = ticker.dividends
+        
+        if div.empty:
+            print(f"No dividend data for {code}")
+            return
+        
+        # Convert to DataFrame
+        div_df = div.reset_index()
+        div_df.columns = ['Date', 'Dividend']
+        
+        # Remove timezone info from dates
+        div_df['Date'] = pd.to_datetime(div_df['Date']).dt.tz_localize(None)
+        div_df['Date'] = div_df['Date'].dt.strftime('%Y-%m-%d')
+        
+        # Save to CSV
+        stock_dir = data_path("STOCK")
+        out = stock_dir / f"{code}_dividends.csv"
+        div_df.to_csv(out, index=False)
+        print(f"Saved {len(div_df)} dividend records to {out}")
+    except Exception as e:
+        print(f"Failed to download dividends for {code}: {e}")
+
+
+    stock_dir = data_path("STOCK")
+    for csv_path in sorted(stock_dir.glob("*.csv")):
+        if csv_path.name.startswith(".") or "_dividends" in csv_path.name:
+            continue
+        code = csv_path.stem
+        download_dividends(code)
+
+
+def download_rates():
+    """Download interest rate data (FEDFUNDS) from FRED."""
+    try:
+        import pandas_datareader.data as web
+        start = datetime.datetime(1954, 7, 1)
+        end = datetime.datetime.now()
+        
+        # FEDFUNDS: Effective Federal Funds Rate (Monthly, Percent, NSA)
+        df = web.DataReader('FEDFUNDS', 'fred', start, end)
+        df = df.reset_index()
+        df.columns = ['Date', 'Value']
+        
+        # Create 'interest.csv' format: Date,Value (Percent)
+        out = data_path("interest.csv")
+        df.to_csv(out, index=False)
+        print(f"Saved {len(df)} interest rate records to {out}")
+        
+    except Exception as e:
+        print(f"Failed to download interest rates: {e}")
+
+
+def download_inflation():
+    """Download inflation data (CPIAUCNS) from FRED."""
+    try:
+        import pandas_datareader.data as web
+        start = datetime.datetime(1913, 1, 1)
+        end = datetime.datetime.now()
+        
+        # CPIAUCNS: Consumer Price Index for All Urban Consumers: All Items
+        # This is an INDEX (Level), e.g. 250.0
+        df = web.DataReader('CPIAUCNS', 'fred', start, end)
+        df = df.reset_index()
+        df.columns = ['Date', 'Value']
+        
+        # Calculate Year-over-Year Inflation Rate (%)
+        # (CPI_t / CPI_{t-12} - 1) * 100
+        df['Value'] = df['Value'].pct_change(12) * 100
+        
+        # Drop NaN values (first 12 months)
+        df = df.dropna()
+        
+        # Create 'inflation.csv' format: Date,Value (Percent)
+        out = data_path("inflation.csv")
+        df.to_csv(out, index=False)
+        print(f"Saved {len(df)} inflation records to {out}")
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"Failed to download inflation data: {e}")
+
+
 if __name__ == "__main__":
     download_data()
-    

@@ -12,13 +12,14 @@ from datetime import date, datetime
 from typing import List, Optional
 
 import numpy as np
+import pandas as pd
 import pyqtgraph as pg
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QLabel, QComboBox, QPushButton, QTextEdit,
     QSpinBox, QDoubleSpinBox, QDateEdit, QListWidget, QListWidgetItem,
-    QAbstractItemView, QSplitter, QGroupBox, QCheckBox
+    QAbstractItemView, QSplitter, QGroupBox, QCheckBox, QMessageBox
 )
 from PyQt5.QtCore import QDate
 
@@ -42,6 +43,26 @@ class BacktestControlPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
         
+        # --- PORTFOLIO MANAGEMENT ---
+        portfolio_group = QGroupBox("Saved Portfolios")
+        portfolio_layout = QHBoxLayout()
+        
+        self.portfolio_combo = QComboBox()
+        self.portfolio_combo.addItem("- Select -")
+        self.portfolio_combo.currentTextChanged.connect(self._on_portfolio_changed)
+        
+        self.save_portfolio_btn = QPushButton("Save")
+        self.save_portfolio_btn.clicked.connect(self._on_save_portfolio)
+        
+        self.del_portfolio_btn = QPushButton("Delete")
+        self.del_portfolio_btn.clicked.connect(self._on_delete_portfolio)
+        
+        portfolio_layout.addWidget(self.portfolio_combo, 7)
+        portfolio_layout.addWidget(self.save_portfolio_btn, 2)
+        portfolio_layout.addWidget(self.del_portfolio_btn, 2)
+        portfolio_group.setLayout(portfolio_layout)
+        layout.addWidget(portfolio_group)
+
         # Strategy selection
         strategy_group = QGroupBox("Strategy")
         strategy_layout = QVBoxLayout(strategy_group)
@@ -148,7 +169,7 @@ class BacktestControlPanel(QWidget):
         withdrawal_layout.addWidget(self.withdrawal_method, 2, 1)
         
         self.adjust_inflation = QCheckBox("Adjust for US Inflation")
-        self.adjust_inflation.setChecked(False)
+        self.adjust_inflation.setChecked(True)
         self.adjust_inflation.setToolTip("Withdrawal amount increases with historical US inflation")
         withdrawal_layout.addWidget(self.adjust_inflation, 3, 0, 1, 2)
         
@@ -184,7 +205,28 @@ class BacktestControlPanel(QWidget):
         self.run_btn.clicked.connect(self._on_run_clicked)
         layout.addWidget(self.run_btn)
         
+        # Show report button
+        self.report_btn = QPushButton("📊 Show Report")
+        self.report_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                font-weight: bold;
+                padding: 8px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
+        layout.addWidget(self.report_btn)
+        
         layout.addStretch()
+        
+        layout.addStretch()
+        
+        # Load saved portfolios
+        self._load_portfolios_to_combo()
     
     def _populate_strategies(self):
         """Populate strategy dropdown from registry."""
@@ -276,6 +318,8 @@ class BacktestControlPanel(QWidget):
         
         if stock_dir.exists():
             for csv_file in sorted(stock_dir.glob("*.csv")):
+                if csv_file.name.endswith("_dividends.csv"):
+                    continue
                 item = QListWidgetItem(csv_file.stem)
                 self.asset_list.addItem(item)
         
@@ -378,6 +422,252 @@ class BacktestControlPanel(QWidget):
     
     def should_adjust_for_inflation(self) -> bool:
         return self.adjust_inflation.isChecked()
+    
+    def get_params(self) -> dict:
+        """Get all current parameters as a dictionary for saving."""
+        return {
+            'strategy': self.strategy_combo.currentText(),
+            'strategy_params': self.get_strategy_params(),
+            'selected_assets': self.get_selected_assets(),
+            'allocation': self.get_allocation(),
+            'start_date': self.get_start_date().isoformat(),
+            'end_date': self.get_end_date().isoformat(),
+            'initial_capital': self.capital_spin.value(),
+            'show_benchmark': self.show_benchmark.isChecked(),
+            'show_vti_benchmark': self.show_vti_benchmark.isChecked(),
+            'withdrawal_amount': self.withdrawal_amount.value(),
+            'withdrawal_period': self.withdrawal_period.value(),
+            'withdrawal_method': self.withdrawal_method.currentText(),
+            'show_vti_withdrawal': self.show_vti_withdrawal.isChecked(),
+            'adjust_inflation': self.adjust_inflation.isChecked()
+        }
+    
+    def set_params(self, params: dict) -> None:
+        """Restore parameters from a dictionary."""
+        if not params:
+            return
+        
+        # Strategy
+        if 'strategy' in params:
+            idx = self.strategy_combo.findText(params['strategy'])
+            if idx >= 0:
+                # This will trigger parameter panel update via signal
+                self.strategy_combo.setCurrentIndex(idx)
+                
+                # Restore strategy parameters if available
+                if 'strategy_params' in params:
+                    s_params = params['strategy_params']
+                    for name, value in s_params.items():
+                        if name in self.param_widgets:
+                            widget = self.param_widgets[name]
+                            if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+                                widget.setValue(value)
+                            elif isinstance(widget, QCheckBox):
+                                widget.setChecked(bool(value))
+        
+        # Assets selection
+        if 'selected_assets' in params:
+            self.asset_list.blockSignals(True)
+            for i in range(self.asset_list.count()):
+                item = self.asset_list.item(i)
+                item.setSelected(item.text() in params['selected_assets'])
+            self.asset_list.blockSignals(False)
+            # Manually trigger update once after bulk selection
+            self._update_allocation_sliders()
+        
+        # Allocation
+        if 'allocation' in params:
+            for symbol, pct in params['allocation'].items():
+                if symbol in self.allocation_sliders:
+                    # Convert float (0.5) to percentage int (50)
+                    self.allocation_sliders[symbol].setValue(int(pct * 100))
+        
+        # Dates
+        if 'start_date' in params:
+            d = date.fromisoformat(params['start_date'])
+            self.start_date.setDate(QDate(d.year, d.month, d.day))
+        if 'end_date' in params:
+            d = date.fromisoformat(params['end_date'])
+            self.end_date.setDate(QDate(d.year, d.month, d.day))
+        
+        # Capital
+        if 'initial_capital' in params:
+            self.capital_spin.setValue(params['initial_capital'])
+        
+        # Checkboxes
+        if 'show_benchmark' in params:
+            self.show_benchmark.setChecked(params['show_benchmark'])
+        if 'show_vti_benchmark' in params:
+            self.show_vti_benchmark.setChecked(params['show_vti_benchmark'])
+        if 'show_vti_withdrawal' in params:
+            self.show_vti_withdrawal.setChecked(params['show_vti_withdrawal'])
+        if 'adjust_inflation' in params:
+            self.adjust_inflation.setChecked(params['adjust_inflation'])
+        
+        # Withdrawal
+        if 'withdrawal_amount' in params:
+            self.withdrawal_amount.setValue(params['withdrawal_amount'])
+        if 'withdrawal_period' in params:
+            self.withdrawal_period.setValue(params['withdrawal_period'])
+        if 'withdrawal_method' in params:
+            idx = self.withdrawal_method.findText(params['withdrawal_method'])
+            if idx >= 0:
+                self.withdrawal_method.setCurrentIndex(idx)
+
+
+    
+    # --- PORTFOLIO MANAGEMENT METHODS ---
+
+    def _load_portfolios_to_combo(self):
+        """Reload portfolios from disk into ComboBox."""
+        from .portfolio_manager import PortfolioManager
+        self.portfolio_combo.blockSignals(True)
+        self.portfolio_combo.clear()
+        self.portfolio_combo.addItem("- Select -")
+        
+        portfolios = PortfolioManager.load_all()
+        for name in sorted(portfolios.keys()):
+            self.portfolio_combo.addItem(name)
+            
+        self.portfolio_combo.blockSignals(False)
+
+    def _on_portfolio_changed(self, name):
+        """Load selected portfolio configuration."""
+        if name == "- Select -" or not name:
+            return
+            
+        from .portfolio_manager import PortfolioManager
+        portfolios = PortfolioManager.load_all()
+        config = portfolios.get(name)
+        if not config:
+            return
+            
+        # Apply config to UI
+        self.blockSignals(True)
+        try:
+            # 1. Strategy
+            idx = self.strategy_combo.findText(config.strategy_name)
+            if idx >= 0:
+                self.strategy_combo.setCurrentIndex(idx)
+            
+            # 2. Assets
+            # Critical: Update QListWidget selection because get_selected_assets() uses it
+            self.asset_list.blockSignals(True)
+            self.asset_list.clearSelection()
+            for i in range(self.asset_list.count()):
+                item = self.asset_list.item(i)
+                if item.text() in config.assets:
+                    item.setSelected(True)
+            self.asset_list.blockSignals(False)
+            
+            self._update_allocation_sliders() # Rebuild sliders based on new selection
+            
+            # 3. Allocation
+            if config.allocation:
+                for symbol, weight in config.allocation.items():
+                    if symbol in self.allocation_sliders:
+                        self.allocation_sliders[symbol].setValue(int(weight * 100))
+                self._on_allocation_change()
+                
+            # 4. Strategy Params
+            # Note: Strategy change triggers param panel rebuild.
+            # We need to explicitly set values now.
+            self._update_parameter_panel() # Ensure fields exist
+            
+            strategy_class = StrategyRegistry.get(config.strategy_name)
+            if strategy_class and strategy_class.parameters:
+                for row, param in enumerate(strategy_class.parameters):
+                    item = self.params_layout.itemAtPosition(row, 1)
+                    if item and item.widget():
+                        widget = item.widget()
+                        val = config.strategy_params.get(param.name)
+                        if val is not None:
+                            if isinstance(widget, QSpinBox):
+                                widget.setValue(int(val))
+                            elif isinstance(widget, QDoubleSpinBox):
+                                widget.setValue(float(val))
+                            elif isinstance(widget, QCheckBox):
+                                 widget.setChecked(bool(val))
+                                 widget.setChecked(bool(val))
+        except Exception as e:
+            print(f"Error applying portfolio config: {e}")
+        finally:
+             self.blockSignals(False)
+        
+        # Auto-run backtest if callback provided
+        # Use QTimer to allow UI state to settle and signal blocks to clear
+        if self.on_run_backtest:
+            QTimer.singleShot(50, self.on_run_backtest)
+
+    def _on_save_portfolio(self):
+        """Save current configuration as a new portfolio."""
+        from PyQt5.QtWidgets import QInputDialog, QMessageBox
+        from .portfolio_manager import PortfolioManager, PortfolioConfig
+        
+        # Pre-fill with current selection if valid
+        current_name = self.portfolio_combo.currentText()
+        default_name = current_name if current_name != "- Select -" else ""
+        
+        name, ok = QInputDialog.getText(self, "Save Portfolio", "Portfolio Name:", text=default_name)
+        if not ok or not name.strip():
+            return
+            
+        name = name.strip()
+        
+        # Check for overwrite
+        existing_portfolios = PortfolioManager.load_all()
+        if name in existing_portfolios:
+            reply = QMessageBox.question(
+                self, "Confirm Overwrite", 
+                f"Portfolio '{name}' already exists.\nDo you want to overwrite it?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+        
+        # Gather current state
+        params = self.get_params()
+        
+        config = PortfolioConfig(
+            name=name,
+            strategy_name=params['strategy'],
+            assets=params['selected_assets'],
+            allocation=params['allocation'],
+            strategy_params=params['strategy_params'],
+            note=""
+        )
+        
+        try:
+            PortfolioManager.save(config)
+            QMessageBox.information(self, "Success", f"Portfolio '{name}' saved.")
+            
+            # Reload combo and select
+            self._load_portfolios_to_combo()
+            self.portfolio_combo.setCurrentText(name)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save: {e}")
+
+    def _on_delete_portfolio(self):
+        """Delete current portfolio."""
+        from PyQt5.QtWidgets import QMessageBox
+        from .portfolio_manager import PortfolioManager
+        
+        name = self.portfolio_combo.currentText()
+        if name == "- Select -":
+            return
+            
+        reply = QMessageBox.question(self, "Confirm Delete", 
+                                   f"Are you sure you want to delete '{name}'?",
+                                   QMessageBox.Yes | QMessageBox.No)
+                                   
+        if reply == QMessageBox.Yes:
+            try:
+                PortfolioManager.delete(name)
+                self._load_portfolios_to_combo()
+                self.portfolio_combo.setCurrentIndex(0)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to delete: {e}")
 
 
 class BacktestPlotPanel(QWidget):
@@ -394,27 +684,73 @@ class BacktestPlotPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         
         # Main equity curve plot
-        self.equity_plot = pg.PlotWidget(title="Equity Curve")
+        self.equity_plot = pg.PlotWidget(title="Equity Curve", axisItems={'bottom': pg.DateAxisItem()})
         self.equity_plot.setLabel('left', 'Equity ($)')
         self.equity_plot.setLabel('bottom', 'Date')
         self.equity_plot.showGrid(x=True, y=True, alpha=0.3)
         self.equity_plot.addLegend()
         layout.addWidget(self.equity_plot, stretch=2)
         
+        # Hover tooltip for equity chart
+        self.equity_vline = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen('#888', style=Qt.DashLine))
+        self.equity_plot.addItem(self.equity_vline, ignoreBounds=True)
+        self.equity_vline.setVisible(False)
+        self.equity_label = pg.TextItem(anchor=(0, 1), fill=pg.mkBrush('#333'))
+        self.equity_plot.addItem(self.equity_label, ignoreBounds=True)
+        self.equity_label.setVisible(False)
+        self.equity_label.setZValue(1000)
+        self.equity_vline.setZValue(1000)
+        self.equity_plot.scene().sigMouseMoved.connect(self._on_equity_hover)
+        
         # Drawdown plot
-        self.drawdown_plot = pg.PlotWidget(title="Drawdown")
+        self.drawdown_plot = pg.PlotWidget(title="Drawdown", axisItems={'bottom': pg.DateAxisItem()})
         self.drawdown_plot.setLabel('left', 'Drawdown (%)')
         self.drawdown_plot.setLabel('bottom', 'Date')
         self.drawdown_plot.showGrid(x=True, y=True, alpha=0.3)
         layout.addWidget(self.drawdown_plot, stretch=1)
         
+        # Hover tooltip for drawdown chart
+        self.drawdown_vline = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen('#888', style=Qt.DashLine))
+        self.drawdown_plot.addItem(self.drawdown_vline, ignoreBounds=True)
+        self.drawdown_vline.setVisible(False)
+        self.drawdown_label = pg.TextItem(anchor=(0, 1), fill=pg.mkBrush('#333'))
+        self.drawdown_plot.addItem(self.drawdown_label, ignoreBounds=True)
+        self.drawdown_label.setVisible(False)
+        self.drawdown_label.setZValue(1000)
+        self.drawdown_vline.setZValue(1000)
+        self.drawdown_plot.scene().sigMouseMoved.connect(self._on_drawdown_hover)
+        
         # Allocation chart
-        self.allocation_plot = pg.PlotWidget(title="Asset Allocation")
+        self.allocation_plot = pg.PlotWidget(title="Asset Allocation", axisItems={'bottom': pg.DateAxisItem()})
         self.allocation_plot.setLabel('left', 'Allocation (%)')
         self.allocation_plot.setLabel('bottom', 'Date')
         self.allocation_plot.showGrid(x=True, y=True, alpha=0.3)
         self.allocation_plot.addLegend()
         layout.addWidget(self.allocation_plot, stretch=1)
+        
+        # Hover tooltip for allocation chart
+        self.allocation_vline = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen('#888', style=Qt.DashLine))
+        self.allocation_plot.addItem(self.allocation_vline, ignoreBounds=True)
+        self.allocation_vline.setVisible(False)
+        
+        self.allocation_label = pg.TextItem(anchor=(0, 1), fill=pg.mkBrush('#333'))
+        self.allocation_plot.addItem(self.allocation_label, ignoreBounds=True)
+        self.allocation_label.setVisible(False)
+        self.allocation_label.setZValue(1000)
+        self.allocation_vline.setZValue(1000)
+        
+        # Connect mouse move signal
+        self.allocation_plot.scene().sigMouseMoved.connect(self._on_allocation_hover)
+        
+        # Link X-axes for synchronized zooming/panning
+        self.drawdown_plot.setXLink(self.equity_plot)
+        self.allocation_plot.setXLink(self.equity_plot)
+        
+        # Disable generic mouse wheel zooming on secondary plots
+        # We only want the top plot (Equity) to control zoom via scroll
+        # But we still want them to accept Drag events (Panning)
+        self.drawdown_plot.wheelEvent = lambda event: None
+        self.allocation_plot.wheelEvent = lambda event: None
     
     def update_plots(self, result: BacktestResult, benchmark: Optional[BacktestResult] = None,
                       vti_prices: Optional[list] = None,
@@ -432,12 +768,21 @@ class BacktestPlotPanel(QWidget):
             if legend:
                 legend.clear()
         
+        # Re-add hover elements after clear
+        self.equity_plot.addItem(self.equity_vline, ignoreBounds=True)
+        self.equity_plot.addItem(self.equity_label, ignoreBounds=True)
+        self.drawdown_plot.addItem(self.drawdown_vline, ignoreBounds=True)
+        self.drawdown_plot.addItem(self.drawdown_label, ignoreBounds=True)
+        
         if not result.equity_curve:
             return
         
         # Convert dates to numeric for plotting
         dates, equities = result.get_equity_series()
-        x = np.arange(len(dates))
+        # Use timestamps for continuous date axis
+        import pandas as pd
+        self.plot_timestamps = np.array([pd.to_datetime(d).timestamp() for d in dates])
+        x = self.plot_timestamps
         
         # Plot strategy equity
         self.equity_plot.plot(
@@ -564,9 +909,12 @@ class BacktestPlotPanel(QWidget):
             colors = ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#F44336', 
                       '#00BCD4', '#E91E63', '#8BC34A', '#FFC107', '#607D8B']
             
+            # Store color mapping for tooltip
+            self.symbol_colors = {}
             for idx, symbol in enumerate(sorted(all_symbols)):
                 alloc_pct = [ep.allocation.get(symbol, 0) * 100 for ep in result.equity_curve]
                 color = colors[idx % len(colors)]
+                self.symbol_colors[symbol] = color
                 self.allocation_plot.plot(
                     x, alloc_pct,
                     pen=pg.mkPen(color=color, width=2),
@@ -574,27 +922,228 @@ class BacktestPlotPanel(QWidget):
                 )
         
         # Set x-axis labels (showing some date labels)
-        if len(dates) > 0:
-            # Create axis labels for key dates
-            step = max(1, len(dates) // 10)
-            ticks = [(i, dates[i].strftime('%Y-%m')) 
-                     for i in range(0, len(dates), step)]
+        # With DateAxisItem, we don't need manual connection, but we can refine it if likely
+        # DateAxisItem handles it automatically.
+        pass
+        
+        # Re-add hover elements after clear
+        self.allocation_plot.addItem(self.allocation_vline, ignoreBounds=True)
+        self.allocation_plot.addItem(self.allocation_label, ignoreBounds=True)
+    
+    def _on_allocation_hover(self, pos):
+        """Handle mouse hover over allocation chart."""
+        if not self.result or not self.result.equity_curve or not hasattr(self, 'plot_timestamps'):
+            return
+        
+        # Check if mouse is within plot area
+        if not self.allocation_plot.sceneBoundingRect().contains(pos):
+            self.allocation_vline.setVisible(False)
+            self.allocation_label.setVisible(False)
+            return
+        
+        # Map position to data coordinates
+        mouse_point = self.allocation_plot.plotItem.vb.mapSceneToView(pos)
+        x_ts = mouse_point.x()
+        
+        # Find nearest index
+        idx = np.searchsorted(self.plot_timestamps, x_ts)
+        if idx >= len(self.plot_timestamps):
+            idx = len(self.plot_timestamps) - 1
+        if idx < 0:
+            idx = 0
             
-            axis = self.equity_plot.getAxis('bottom')
-            axis.setTicks([ticks])
+        # Refine nearest
+        if idx > 0:
+            if abs(x_ts - self.plot_timestamps[idx-1]) < abs(x_ts - self.plot_timestamps[idx]):
+                idx -= 1
+        
+        if idx < 0 or idx >= len(self.result.equity_curve):
+            self.allocation_vline.setVisible(False)
+            self.allocation_label.setVisible(False)
+            return
             
-            axis_dd = self.drawdown_plot.getAxis('bottom')
-            axis_dd.setTicks([ticks])
+        x_val = self.plot_timestamps[idx] # Snap to actual data point X
+        
+        # Get data for this date
+        ep = self.result.equity_curve[idx]
+        
+        # Load dividend data if not already loaded or if symbols changed
+        current_symbols = frozenset(self.result.symbols)
+        if not hasattr(self, '_dividend_data') or getattr(self, '_dividend_symbols', None) != current_symbols:
+            from .read_data import load_dividends
+            self._dividend_data = {}
+            self._price_data = None  # Reset price data too
+            for symbol in self.result.symbols:
+                self._dividend_data[symbol] = load_dividends(symbol)
+            self._dividend_symbols = current_symbols
+        
+        # Build tooltip text with colored indicators
+        html_lines = [
+            f"<div style='font-family: monospace; padding: 4px;'>",
+            f"<b>📅 {ep.date.strftime('%Y-%m-%d')}</b><br>",
+            f"💰 Equity: ${ep.equity:,.0f}<br>"
+        ]
+        for symbol, pct in sorted(ep.allocation.items()):
+            value = ep.equity * pct
+            color = getattr(self, 'symbol_colors', {}).get(symbol, '#888')
             
-            axis_alloc = self.allocation_plot.getAxis('bottom')
-            axis_alloc.setTicks([ticks])
+            # Load price data if not already loaded
+            if not hasattr(self, '_price_data') or self._price_data is None:
+                from .read_data import stock_data_daily
+                self._price_data = {}
+                for s in self.result.symbols:
+                    bars = stock_data_daily(s)
+                    self._price_data[s] = {b.date: b.close for b in bars}
+            
+            # Calculate shares
+            price = self._price_data.get(symbol, {}).get(ep.date, 0)
+            if price > 0 and symbol != "CASH":
+                shares = value / price
+                line = f"<span style='color:{color}'>■</span> {symbol}: {pct*100:.1f}%, ${value:,.0f}, {shares:.0f}"
+            else:
+                line = f"<span style='color:{color}'>■</span> {symbol}: {pct*100:.1f}%, ${value:,.0f}"
+            
+            # Find the most recent dividend on or before this date
+            div_data = self._dividend_data.get(symbol, {})
+            recent_div = 0
+            recent_div_date = None
+            for div_date, div_amount in div_data.items():
+                if div_date <= ep.date and (recent_div_date is None or div_date > recent_div_date):
+                    recent_div = div_amount
+                    recent_div_date = div_date
+            
+            if recent_div > 0 and price > 0:
+                total_div = shares * recent_div
+                line += f" <span style='color:#FFD700'>💵${recent_div:.2f}×{shares:.0f}=${total_div:.0f}</span>"
+            
+            html_lines.append(line + "<br>")
+        html_lines.append("</div>")
+        
+        # Update tooltip
+        self.allocation_vline.setPos(x_val)
+        self.allocation_vline.setVisible(True)
+        
+        self.allocation_label.setHtml("".join(html_lines))
+        self.allocation_label.setPos(x_val, mouse_point.y())
+        self.allocation_label.setVisible(True)
+    
+    def _on_equity_hover(self, pos):
+        """Handle mouse hover over equity chart."""
+        if not self.result or not self.result.equity_curve or not hasattr(self, 'plot_timestamps'):
+            return
+        
+        if not self.equity_plot.sceneBoundingRect().contains(pos):
+            self.equity_vline.setVisible(False)
+            self.equity_label.setVisible(False)
+            return
+        
+        mouse_point = self.equity_plot.plotItem.vb.mapSceneToView(pos)
+        x_ts = mouse_point.x()
+        
+        # Find nearest index
+        idx = np.searchsorted(self.plot_timestamps, x_ts)
+        if idx >= len(self.plot_timestamps):
+            idx = len(self.plot_timestamps) - 1
+        if idx < 0:
+            idx = 0
+            
+        # Refine nearest
+        if idx > 0:
+            if abs(x_ts - self.plot_timestamps[idx-1]) < abs(x_ts - self.plot_timestamps[idx]):
+                idx -= 1
+        
+        if idx < 0 or idx >= len(self.result.equity_curve):
+            self.equity_vline.setVisible(False)
+            self.equity_label.setVisible(False)
+            return
+            
+        x_val = self.plot_timestamps[idx] # Snap to actual data point X
+        
+        ep = self.result.equity_curve[idx]
+        total_return = (ep.equity / self.result.initial_capital - 1) * 100
+        
+        lines = [
+            f"📅 {ep.date.strftime('%Y-%m-%d')}",
+            f"💰 Equity: ${ep.equity:,.0f}",
+            f"📈 Return: {total_return:+.1f}%",
+            "",  # Separator
+            "📊 Allocation:"
+        ]
+        
+        # Sort allocation by percentage descending
+        sorted_alloc = sorted(ep.allocation.items(), key=lambda x: x[1], reverse=True)
+        
+        for symbol, pct in sorted_alloc:
+            if pct < 0.001:  # Skip < 0.1% to avoid clutter
+                continue
+            value = ep.equity * pct
+            lines.append(f"• {symbol}: {pct*100:.1f}% (${value:,.0f})")
+        
+        self.equity_vline.setPos(x_val)
+        self.equity_vline.setVisible(True)
+        self.equity_label.setText("\n".join(lines))
+        self.equity_label.setPos(x_val, mouse_point.y())
+        self.equity_label.setVisible(True)
+    
+    def _on_drawdown_hover(self, pos):
+        """Handle mouse hover over drawdown chart."""
+        if not self.result or not self.result.equity_curve or not hasattr(self, 'plot_timestamps'):
+            return
+        
+        if not self.drawdown_plot.sceneBoundingRect().contains(pos):
+            self.drawdown_vline.setVisible(False)
+            self.drawdown_label.setVisible(False)
+            return
+        
+        mouse_point = self.drawdown_plot.plotItem.vb.mapSceneToView(pos)
+        x_ts = mouse_point.x()
+        
+        # Find nearest index
+        idx = np.searchsorted(self.plot_timestamps, x_ts)
+        if idx >= len(self.plot_timestamps):
+            idx = len(self.plot_timestamps) - 1
+        if idx < 0:
+            idx = 0
+            
+        # Refine nearest
+        if idx > 0:
+            if abs(x_ts - self.plot_timestamps[idx-1]) < abs(x_ts - self.plot_timestamps[idx]):
+                idx -= 1
+        
+        if idx < 0 or idx >= len(self.result.equity_curve):
+            self.drawdown_vline.setVisible(False)
+            self.drawdown_label.setVisible(False)
+            return
+        
+        x_val = self.plot_timestamps[idx] # Snap to actual data point X
+        
+        # Calculate drawdown at this point
+        equities = [ep.equity for ep in self.result.equity_curve[:idx+1]]
+        peak = max(equities) if equities else self.result.initial_capital
+        ep = self.result.equity_curve[idx]
+        drawdown = (ep.equity - peak) / peak * 100 if peak > 0 else 0
+        
+        lines = [
+            f"📅 {ep.date.strftime('%Y-%m-%d')}",
+            f"📉 Drawdown: {drawdown:.1f}%",
+            f"💰 Equity: ${ep.equity:,.0f}",
+            f"🔝 Peak: ${peak:,.0f}"
+        ]
+        
+        self.drawdown_vline.setPos(x_val)
+        self.drawdown_vline.setVisible(True)
+        self.drawdown_label.setText("\n".join(lines))
+        self.drawdown_label.setPos(x_val, mouse_point.y())
+        self.drawdown_label.setVisible(True)
 
 
-class BacktestResultsPanel(QWidget):
-    """Panel for displaying backtest metrics."""
+class BacktestReportWindow(QWidget):
+    """Popup window for displaying backtest report."""
     
     def __init__(self):
         super().__init__()
+        self.setWindowTitle("Backtest Report")
+        self.resize(500, 700)
         self._setup_ui()
     
     def _setup_ui(self):
@@ -613,9 +1162,26 @@ class BacktestResultsPanel(QWidget):
         """)
         layout.addWidget(self.results_text)
     
-    def update_results(self, result: BacktestResult):
-        """Update results display."""
-        self.results_text.setPlainText(result.summary())
+    def set_report(self, result: BacktestResult, benchmark: BacktestResult = None):
+        """Set the report text from backtest result."""
+        report = result.summary(benchmark)
+        
+        # Add transaction log at the bottom
+        if result.transaction_log:
+            report += "\n\n" + "=" * 60
+            report += "\n📋 TRANSACTION LOG"
+            report += "\n" + "=" * 60 + "\n"
+            # Show last 100 transactions (most recent at bottom)
+            recent_log = result.transaction_log
+            report += "\n".join(recent_log)
+        
+        self.results_text.setPlainText(report)
+    
+    def show_report(self):
+        """Show the report window."""
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
 
 class BacktestWindow(QMainWindow):
@@ -627,32 +1193,55 @@ class BacktestWindow(QMainWindow):
         self.setGeometry(100, 100, 1200, 800)
         
         self._setup_ui()
+        
+        # Auto-run backtest on startup (delayed slightly to ensure UI is ready)
+        QTimer.singleShot(100, self.run_backtest)
+
     
     def _setup_ui(self):
-        central = QWidget()
-        self.setCentralWidget(central)
+        from PyQt5.QtWidgets import QTabWidget
+        from .compare_gui import ComparisonWidget
         
-        main_layout = QHBoxLayout(central)
+        self.tabs = QTabWidget()
+        self.setCentralWidget(self.tabs)
+        
+        # --- TAB 1: Strategy Lab (Existing UI) ---
+        self.lab_tab = QWidget()
+        lab_layout = QHBoxLayout(self.lab_tab)
         
         # Left: Control panel
         self.control_panel = BacktestControlPanel(on_run_backtest=self.run_backtest)
         self.control_panel.setFixedWidth(280)
-        main_layout.addWidget(self.control_panel)
+        lab_layout.addWidget(self.control_panel)
         
-        # Right side splitter
-        right_splitter = QSplitter(Qt.Vertical)
-        
-        # Top: Plot panel
+        # Right: Plot panel
         self.plot_panel = BacktestPlotPanel()
-        right_splitter.addWidget(self.plot_panel)
+        lab_layout.addWidget(self.plot_panel)
         
-        # Bottom: Results panel
-        self.results_panel = BacktestResultsPanel()
-        self.results_panel.setMaximumHeight(200)
-        right_splitter.addWidget(self.results_panel)
+        self.tabs.addTab(self.lab_tab, "Strategy Lab")
         
-        right_splitter.setSizes([600, 200])
-        main_layout.addWidget(right_splitter)
+        # --- TAB 2: Comparison (New UI) ---
+        self.comparison_tab = ComparisonWidget()
+        self.tabs.addTab(self.comparison_tab, "Comparison")
+        
+        # Report popup window
+        self.report_window = BacktestReportWindow()
+        
+        # Connect Show Report button
+        self.control_panel.report_btn.clicked.connect(self._show_report)
+        
+        # Determine tab change to refresh comparison list
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+    
+    def _on_tab_changed(self, index):
+        """Handle tab switch."""
+        # Index 1 is Comparison Tab
+        if index == 1:
+            self.comparison_tab.reload_portfolios()
+            
+    def _show_report(self):
+        """Show the report popup window."""
+        self.report_window.show_report()
     
     def run_backtest(self):
         """Execute backtest with current settings."""
@@ -711,7 +1300,7 @@ class BacktestWindow(QMainWindow):
             # Run benchmark if requested
             benchmark = None
             if self.control_panel.should_show_benchmark() and strategy_name != "Buy and Hold":
-                bench_strategy = StrategyRegistry.create("Buy and Hold")
+                bench_strategy = StrategyRegistry.create("Buy and Hold", allocation=allocation)
                 if bench_strategy:
                     bench_backtester = Backtester(
                         strategy=bench_strategy,
@@ -728,13 +1317,20 @@ class BacktestWindow(QMainWindow):
                     benchmark = bench_backtester.run()
             
             # Load VTI price benchmark if requested
-            vti_prices = None
+            # Load VTI price benchmark if requested
+            vti_prices_list = None
             if self.control_panel.should_show_vti_benchmark():
                 from .read_data import stock_data_daily
                 vti_bars = stock_data_daily("VTI")
-                # Filter to date range and extract closing prices
+                
+                # Filter to date range for plotting
                 dates_set = set(ep.date for ep in result.equity_curve)
-                vti_prices = [bar.close for bar in vti_bars if bar.date in dates_set]
+                vti_prices_list = [bar.close for bar in vti_bars if bar.date in dates_set]
+                
+                # Calculate Alpha/Beta using full overlapping data
+                vti_dates = [bar.date for bar in vti_bars]
+                vti_closes = [bar.close for bar in vti_bars]
+                result.calculate_benchmark_metrics(vti_closes, vti_dates)
             
             # Run VTI + Withdrawal benchmark if requested
             vti_withdrawal_result = None
@@ -749,16 +1345,17 @@ class BacktestWindow(QMainWindow):
                         initial_capital=capital,
                         withdrawal_amount=withdrawal_amount,
                         withdrawal_period_days=withdrawal_period,
-                        withdrawal_method=withdrawal_method
+                        withdrawal_method=withdrawal_method,
+                        adjust_for_inflation=adjust_inflation
                     )
                     vti_withdrawal_result = vti_backtester.run()
             
             # Update UI
-            self.plot_panel.update_plots(result, benchmark, vti_prices, vti_withdrawal_result)
-            self.results_panel.update_results(result)
+            self.plot_panel.update_plots(result, benchmark, vti_prices_list, vti_withdrawal_result)
+            self.report_window.set_report(result, benchmark)
             
         except Exception as e:
-            self.results_panel.results_text.setPlainText(
+            self.report_window.results_text.setPlainText(
                 f"Error running backtest:\n{str(e)}"
             )
             import traceback

@@ -1,7 +1,8 @@
 import csv
 import os
-import pickle
+
 from dataclasses import dataclass
+from datetime import date
 from functools import lru_cache, reduce, wraps
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -235,15 +236,6 @@ def get_value_by_year(data: List[Record], year: int, default=None):
 @lru_cache(maxsize=None)
 def stock_data(code="SP500", per_year=True):
     csv_path = data_path("STOCK", f"{code}.csv")
-    pickle_path = data_path("STOCK", f"{csv_path.stem}_processed.pkl")
-    
-    # Try to load from pickle cache first
-    # if os.path.exists(pickle_path):
-    #     try:
-    #         with open(pickle_path, 'rb') as f:
-    #             return pickle.load(f)
-    #     except (pickle.PickleError, EOFError, FileNotFoundError):
-    #         pass  # Fall through to recompute if pickle is corrupted
     
     # Process the data
     csv_data = read_data(csv_path=csv_path)
@@ -254,29 +246,12 @@ def stock_data(code="SP500", per_year=True):
         records = list(records.values())
 
     records = compute_annual_change_rate(records)
-    # year_data = filter_data_after_1960(year_data)
-    
-    # Save to pickle cache
-    # try:
-    #     with open(pickle_path, 'wb') as f:
-    #         pickle.dump(year_data, f)
-    # except (pickle.PickleError, IOError):
-    #     pass  # Continue even if we can't save the cache
     
     return records
 
 @lru_cache(maxsize=None)
 def interest_data():
     csv_path = data_path("interest.csv")
-    pickle_path = os.path.splitext(csv_path)[0] + "_processed.pkl"
-    
-    # Try to load from pickle cache first
-    if os.path.exists(pickle_path):
-        try:
-            with open(pickle_path, 'rb') as f:
-                return pickle.load(f)
-        except (pickle.PickleError, EOFError, FileNotFoundError):
-            pass  # Fall through to recompute if pickle is corrupted
     
     # Process the data
     csv_data = read_data(csv_path=csv_path)
@@ -287,27 +262,12 @@ def interest_data():
         if row.value is not None:
             row.value = row.value / 100.0
     
-    # Save to pickle cache
-    try:
-        with open(pickle_path, 'wb') as f:
-            pickle.dump(year_data, f)
-    except (pickle.PickleError, IOError):
-        pass  # Continue even if we can't save the cache
-    
     return year_data
 
 @lru_cache(maxsize=None)
+@lru_cache(maxsize=None)
 def inflation_data():
     csv_path = data_path("inflation.csv")
-    pickle_path = os.path.splitext(csv_path)[0] + "_processed.pkl"
-    
-    # Try to load from pickle cache first
-    if os.path.exists(pickle_path):
-        try:
-            with open(pickle_path, 'rb') as f:
-                return pickle.load(f)
-        except (pickle.PickleError, EOFError, FileNotFoundError):
-            pass  # Fall through to recompute if pickle is corrupted
     
     # Process the data
     csv_data = read_data(csv_path=csv_path)
@@ -317,13 +277,6 @@ def inflation_data():
     for row in year_data:
         if row.value is not None:
             row.value = row.value / 100.0
-    
-    # Save to pickle cache
-    try:
-        with open(pickle_path, 'wb') as f:
-            pickle.dump(year_data, f)
-    except (pickle.PickleError, IOError):
-        pass  # Continue even if we can't save the cache
     
     return year_data
 
@@ -484,6 +437,58 @@ def stock_data_daily(code: str = "VTI"):
     # Sort by date
     bars.sort(key=lambda b: b.date)
     return bars
+
+
+def load_dividends(code: str) -> Dict[date, float]:
+    """
+    Load dividend data for a stock.
+    
+    Returns:
+        Dict mapping date to dividend per share amount.
+        Empty dict if no dividend data available.
+    """
+    from datetime import date
+    
+    csv_path = data_path("STOCK", f"{code}_dividends.csv")
+    if not csv_path.exists():
+        return {}
+    
+    dividends = {}
+    try:
+        with open(csv_path, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    d = date.fromisoformat(row['Date'])
+                    div = float(row['Dividend'])
+                    dividends[d] = div
+                except (ValueError, KeyError):
+                    continue
+    except Exception:
+        return {}
+    
+    return dividends
+
+
+
+def load_rf_rates() -> Dict[date, float]:
+    """
+    Load monthly risk-free rates (FEDFUNDS) from interest.csv.
+    Returns: Dict[date, rate] where rate is annualized (e.g. 0.05 for 5%)
+    """
+    csv_path = data_path("interest.csv")
+    csv_data = read_data(csv_path=csv_path)
+    records = to_records(csv_data)
+    
+    final_rates = {}
+    for r in records:
+        if r.value is not None:
+            ymd = _parse_date_fast(r.date)
+            if ymd:
+                d = date(ymd[0], ymd[1], ymd[2])
+                final_rates[d] = r.value / 100.0
+                
+    return final_rates
 
 
 if __name__ == "__main__":

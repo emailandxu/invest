@@ -1,0 +1,198 @@
+{
+  "线上策略": {
+    "name": "线上策略",
+    "strategy_name": "Periodic Rebalance",
+    "assets": [
+      "BRK-B",
+      "GLD",
+      "QQQ",
+      "VTI"
+    ],
+    "allocation": {
+      "BRK-B": 0.12,
+      "GLD": 0.5,
+      "QQQ": 0.12,
+      "VTI": 0.26
+    },
+    "strategy_params": {
+      "rebalance_days": 252
+    },
+    "note": ""
+  },
+  "杠铃策略-10%BND": {
+    "name": "杠铃策略-10%BND",
+    "strategy_name": "Periodic Rebalance",
+    "assets": [
+      "BND",
+      "BRK-B",
+      "QQQ"
+    ],
+    "allocation": {
+      "BND": 0.1,
+      "BRK-B": 0.45,
+      "QQQ": 0.45
+    },
+    "strategy_params": {
+      "rebalance_days": 252
+    },
+    "note": ""
+  },
+  "杠铃策略": {
+    "name": "杠铃策略",
+    "strategy_name": "Periodic Rebalance",
+    "assets": [
+      "BRK-B",
+      "QQQ"
+    ],
+    "allocation": {
+      "BRK-B": 0.5,
+      "QQQ": 0.5
+    },
+    "strategy_params": {
+      "rebalance_days": 252
+    },
+    "note": ""
+  },
+  "VTI100%": {
+    "name": "VTI100%",
+    "strategy_name": "Periodic Rebalance",
+    "assets": [
+      "VTI"
+    ],
+    "allocation": {
+      "VTI": 1.0
+    },
+    "strategy_params": {
+      "rebalance_days": 22
+    },
+    "note": ""
+  },
+  "杠铃策略-10%GLD": {
+    "name": "杠铃策略-10%GLD",
+    "strategy_name": "Periodic Rebalance",
+    "assets": [
+      "BRK-B",
+      "QQQ",
+      "GLD"
+    ],
+    "allocation": {
+      "BRK-B": 0.45,
+      "QQQ": 0.45,
+      "GLD": 0.1
+    },
+    "strategy_params": {
+      "rebalance_days": 252
+    },
+    "note": ""
+  },
+  "杠铃策略-30%GLD": {
+    "name": "杠铃策略-30%GLD",
+    "strategy_name": "Periodic Rebalance",
+    "assets": [
+      "BRK-B",
+      "GLD",
+      "QQQ"
+    ],
+    "allocation": {
+      "BRK-B": 0.35,
+      "GLD": 0.3,
+      "QQQ": 0.35
+    },
+    "strategy_params": {
+      "rebalance_days": 252
+    },
+    "note": ""
+  },
+  "QQQ100%": {
+    "name": "QQQ100%",
+    "strategy_name": "Periodic Rebalance",
+    "assets": [
+      "QQQ"
+    ],
+    "allocation": {
+      "QQQ": 1.0
+    },
+    "strategy_params": {
+      "rebalance_days": 22
+    },
+    "note": ""
+  },
+  "BRK-B100%": {
+    "name": "BRK-B100%",
+    "strategy_name": "Buy and Hold",
+    "assets": [
+      "BRK-B"
+    ],
+    "allocation": {
+      "BRK-B": 1.0
+    },
+    "strategy_params": {},
+    "note": ""
+  },
+  "GLD100%": {
+    "name": "GLD100%",
+    "strategy_name": "Buy and Hold",
+    "assets": [
+      "GLD"
+    ],
+    "allocation": {
+      "GLD": 1.0
+    },
+    "strategy_params": {},
+    "note": ""
+  },
+  "杠铃策略-50%GLD": {
+    "name": "杠铃策略-50%GLD",
+    "strategy_name": "Periodic Rebalance",
+    "assets": [
+      "BRK-B",
+      "GLD",
+      "QQQ"
+    ],
+    "allocation": {
+      "BRK-B": 0.25,
+      "GLD": 0.5,
+      "QQQ": 0.25
+    },
+    "strategy_params": {
+      "rebalance_days": 252
+    },
+    "note": ""
+  },
+  "杠铃策略-30%BND": {
+    "name": "杠铃策略-30%BND",
+    "strategy_name": "Periodic Rebalance",
+    "assets": [
+      "BRK-B",
+      "QQQ",
+      "BND"
+    ],
+    "allocation": {
+      "BRK-B": 0.35,
+      "QQQ": 0.35,
+      "BND": 0.3
+    },
+    "strategy_params": {
+      "rebalance_days": 252
+    },
+    "note": ""
+  },
+  "杠铃策略-50%BND": {
+    "name": "杠铃策略-50%BND",
+    "strategy_name": "Periodic Rebalance",
+    "assets": [
+      "BND",
+      "BRK-B",
+      "QQQ"
+    ],
+    "allocation": {
+      "BND": 0.5,
+      "BRK-B": 0.25,
+      "QQQ": 0.25
+    },
+    "strategy_params": {
+      "rebalance_days": 252
+    },
+    "note": ""
+  }
+}

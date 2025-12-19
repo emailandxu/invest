@@ -59,6 +59,42 @@ class Bar:
         return (self.high + self.low + self.close) / 3.0
 
 
+def create_backtester_from_config(config: 'PortfolioConfig', start_date, end_date, initial_capital, 
+                                  withdrawal_amount=0, withdrawal_period_days=30, 
+                                  withdrawal_method="proportional", adjust_for_inflation=False) -> 'Backtester':
+    """
+    Helper to create a Backtester instance from a PortfolioConfig.
+    
+    Args:
+        config: PortfolioConfig object defining strategy and assets
+        start_date: Backtest start date
+        end_date: Backtest end date
+        initial_capital: Initial capital
+        withdrawal_amount: Amount to withdraw periodically
+        withdrawal_period_days: How often to withdraw
+        withdrawal_method: 'proportional', 'rebalance', 'sell_winners', 'sell_losers'
+        adjust_for_inflation: Whether to adjust nominal withdrawal amount for inflation
+    """
+    # Import locally to avoid circular import issues if Config imports Backtester/StrategyRegistry
+    from .portfolio_manager import PortfolioConfig
+    
+    strategy = config.create_strategy()
+    
+    return Backtester(
+        strategy=strategy,
+        symbols=config.assets,
+        start_date=start_date,
+        end_date=end_date,
+        initial_capital=initial_capital,
+        withdrawal_amount=withdrawal_amount,
+        withdrawal_period_days=withdrawal_period_days,
+        withdrawal_method=withdrawal_method,
+        target_allocation=config.allocation,
+        adjust_for_inflation=adjust_for_inflation
+    )
+
+
+
 @dataclass
 class Order:
     """Represents a trading order."""
@@ -126,6 +162,38 @@ class EquityPoint:
     allocation: Dict[str, float] = field(default_factory=dict)  # symbol -> percentage (0-1)
 
 
+class TransactionType(Enum):
+    """Types of cash transactions."""
+    BUY = "BUY"
+    SELL = "SELL"
+    DIVIDEND = "DIV"
+    WITHDRAWAL = "SPEND"
+
+
+@dataclass
+class Transaction:
+    """Represents a cash transaction for tracking and logging."""
+    date: date
+    type: TransactionType
+    symbol: str = ""
+    quantity: float = 0.0
+    price: float = 0.0
+    cash_change: float = 0.0  # Positive = cash in, negative = cash out
+    note: str = ""
+    
+    def log_line(self, balance: float) -> str:
+        """Generate log line for this transaction."""
+        type_str = self.type.value
+        if self.type == TransactionType.BUY:
+            return f"{self.date} | {type_str:5} | {self.symbol:6} | {self.quantity:8.2f} @ ${self.price:8.2f} | {self.cash_change:+12,.0f} | ${balance:12,.0f}"
+        elif self.type == TransactionType.SELL:
+            return f"{self.date} | {type_str:5} | {self.symbol:6} | {self.quantity:8.2f} @ ${self.price:8.2f} | {self.cash_change:+12,.0f} | ${balance:12,.0f}"
+        elif self.type == TransactionType.DIVIDEND:
+            return f"{self.date} | {type_str:5} | {self.symbol:6} | {self.quantity:8.2f} x ${self.price:8.4f} | {self.cash_change:+12,.0f} | ${balance:12,.0f}"
+        else:  # WITHDRAWAL
+            return f"{self.date} | {type_str:5} | {'CASH':6} |  {self.quantity:8.2f} x ${1.0:8.4f}| {self.cash_change:+12,.0f} | ${balance:12,.0f}"
+
+
 class BacktestContext:
     """
     Context object provided to strategies during backtesting.
@@ -149,6 +217,68 @@ class BacktestContext:
         self.trades: List[Trade] = []
         self.equity_curve: List[EquityPoint] = []
         self._state: Dict = {}  # Strategy state storage
+        self.transaction_log: List[str] = []  # Cash-centric transaction log
+        self.transactions: List[Transaction] = []  # Transaction objects
+    
+    def record_transaction(self, txn: Transaction) -> None:
+        """Execute a transaction: update cash and log."""
+        self.cash += txn.cash_change
+        self.transaction_log.append(txn.log_line(self.cash))
+        self.transactions.append(txn)
+    
+    def record_buy(self, symbol: str, quantity: float, price: float, commission: float = 0.0) -> Transaction:
+        """Record a buy transaction."""
+        cash_change = -(quantity * price + commission)
+        txn = Transaction(
+            date=self.current_date,
+            type=TransactionType.BUY,
+            symbol=symbol,
+            quantity=quantity,
+            price=price,
+            cash_change=cash_change
+        )
+        self.record_transaction(txn)
+        return txn
+    
+    def record_sell(self, symbol: str, quantity: float, price: float, commission: float = 0.0) -> Transaction:
+        """Record a sell transaction."""
+        cash_change = quantity * price - commission
+        txn = Transaction(
+            date=self.current_date,
+            type=TransactionType.SELL,
+            symbol=symbol,
+            quantity=quantity,
+            price=price,
+            cash_change=cash_change
+        )
+        self.record_transaction(txn)
+        return txn
+    
+    def record_dividend(self, symbol: str, shares: float, per_share: float) -> Transaction:
+        """Record dividend income."""
+        cash_change = shares * per_share
+        txn = Transaction(
+            date=self.current_date,
+            type=TransactionType.DIVIDEND,
+            symbol=symbol,
+            quantity=shares,
+            price=per_share,
+            cash_change=cash_change
+        )
+        self.record_transaction(txn)
+        return txn
+    
+    def record_withdrawal(self, amount: float, note: str = "") -> Transaction:
+        """Record a withdrawal/consumption."""
+        txn = Transaction(
+            date=self.current_date,
+            type=TransactionType.WITHDRAWAL,
+            price=1.0,
+            quantity=amount,
+            cash_change=-amount
+        )
+        self.record_transaction(txn)
+        return txn
     
     @property
     def equity(self) -> float:
@@ -404,6 +534,10 @@ class BacktestResult:
     final_equity: float
     equity_curve: List[EquityPoint]
     trades: List[Trade]
+    total_dividends: float = 0.0
+    transaction_log: List[str] = field(default_factory=list)
+    alpha: Optional[float] = None
+    beta: Optional[float] = None
     
     @property
     def total_return(self) -> float:
@@ -465,19 +599,77 @@ class BacktestResult:
     @property
     def sharpe_ratio(self) -> float:
         """
-        Sharpe ratio assuming risk-free rate of 0.
+        Sharpe ratio using daily risk-free rate from interest data.
         Annualized based on 252 trading days.
         """
         if len(self.equity_curve) < 2:
             return 0.0
         
+        # Calculate Strategy Returns
         equities = np.array([ep.equity for ep in self.equity_curve])
-        returns = np.diff(equities) / equities[:-1]
+        returns = np.diff(equities) / equities[:-1] # Daily returns
         
-        if len(returns) == 0 or np.std(returns) == 0:
+        if len(returns) == 0:
             return 0.0
-        
-        return np.mean(returns) / np.std(returns) * np.sqrt(252)
+
+        # Load Risk Free Rates (Annualized)
+        try:
+            from .read_data import load_rf_rates
+            rf_data = load_rf_rates()
+            if not rf_data:
+                raise ValueError("No RF data")
+                
+            # Create sorted list of dates and rates for lookup
+            rf_dates_sorted = sorted(rf_data.keys())
+            
+            # Map daily returns to daily RF rate
+            # Strategy Dates: equity_curve[0].date is start, equity_curve[1].date is first return day
+            # returns[i] corresponds to period from date[i] to date[i+1]
+            return_dates = [ep.date for ep in self.equity_curve[1:]]
+            
+            excess_returns = []
+            
+            for i, r_date in enumerate(return_dates):
+                # Find latest RF rate available on or before r_date
+                # Simple linear scan or bisect. Given monthly data and ordered dates, 
+                # we can just find the max date <= r_date
+                
+                # Optimized: Since data is monthly, just get Y-M
+                # But efficient lookup:
+                # Use the rate from the start of the month/previous month
+                
+                # Let's simple check: Find last date in rf_dates <= r_date
+                # Ideally use bisect, but for simplicity:
+                current_rf = 0.0
+                
+                # Find most recent rate (poor man's ffill)
+                # Since rf_dates might be few (months) and backtest (days), 
+                # Bisect is better.
+                import bisect
+                idx = bisect.bisect_right(rf_dates_sorted, r_date)
+                if idx > 0:
+                    last_date = rf_dates_sorted[idx-1]
+                    current_rf = rf_data[last_date]
+                
+                # Convert Annual RF to Daily RF
+                # Daily RF = (1 + Annual)^(1/252) - 1  OR approx Annual / 252
+                daily_rf = current_rf / 252.0
+                
+                excess_returns.append(returns[i] - daily_rf)
+                
+            excess_returns = np.array(excess_returns)
+            
+            if np.std(excess_returns) == 0:
+                return 0.0
+                
+            return np.mean(excess_returns) / np.std(excess_returns) * np.sqrt(252)
+            
+        except ImportError:
+            # Fallback to RF=0 if module issue
+            return np.mean(returns) / np.std(returns) * np.sqrt(252)
+        except Exception:
+            # Fallback if logic mismatch or empty data
+            return np.mean(returns) / np.std(returns) * np.sqrt(252)
     
     @property
     def sortino_ratio(self) -> float:
@@ -543,33 +735,149 @@ class BacktestResult:
         equities = [ep.equity for ep in self.equity_curve]
         return dates, equities
     
-    def summary(self) -> str:
+    @property
+    def volatility(self) -> float:
+        """Annualized volatility (standard deviation of returns)."""
+        if len(self.equity_curve) < 2:
+            return 0.0
+        
+        equities = np.array([ep.equity for ep in self.equity_curve])
+        returns = np.diff(equities) / equities[:-1]
+        
+        if len(returns) == 0:
+            return 0.0
+            
+        return np.std(returns) * np.sqrt(252)
+
+    def calculate_benchmark_metrics(self, benchmark_prices: List[float], benchmark_dates: List[date]):
+        """
+        Calculate Beta and Alpha against a benchmark series.
+        
+        Args:
+            benchmark_prices: List of benchmark closing prices
+            benchmark_dates: List of corresponding dates
+        """
+        if not self.equity_curve or not benchmark_prices:
+            return
+
+        # Create dictionaries for alignment
+        strategy_series = {ep.date: ep.equity for ep in self.equity_curve}
+        benchmark_series = {d: p for d, p in zip(benchmark_dates, benchmark_prices)}
+        
+        # Find common dates
+        common_dates = sorted(list(set(strategy_series.keys()) & set(benchmark_series.keys())))
+        
+        if len(common_dates) < 2:
+            return
+            
+        # Extract aligned prices
+        strat_prices = np.array([strategy_series[d] for d in common_dates])
+        bench_prices = np.array([benchmark_series[d] for d in common_dates])
+        
+        # Calculate returns
+        strat_returns = np.diff(strat_prices) / strat_prices[:-1]
+        bench_returns = np.diff(bench_prices) / bench_prices[:-1]
+        
+        if len(strat_returns) == 0 or np.var(bench_returns) == 0:
+            return
+            
+        # Calculate Beta: Covariance / Variance
+        # Use ddof=1 for unbiased estimator to match np.cov default
+        covariance = np.cov(strat_returns, bench_returns)[0][1]
+        variance = np.var(bench_returns, ddof=1)
+        self.beta = covariance / variance
+        
+        # Calculate Alpha (Annualized): Strategy Return - Beta * Benchmark Return
+        # Assuming Risk Free Rate approx 0 for simplicity in this contest
+        strat_ann_ret = np.mean(strat_returns) * 252
+        bench_ann_ret = np.mean(bench_returns) * 252
+        
+        self.alpha = strat_ann_ret - (self.beta * bench_ann_ret)
+
+    def summary(self, benchmark: 'BacktestResult' = None) -> str:
         """Generate a summary report string."""
+        
+        # Helper to format diff
+        def fmt_diff(val1, val2, is_pct=False):
+            diff = val1 - val2
+            sign = "+" if diff >= 0 else ""
+            if is_pct:
+                return f"{sign}{diff*100:.2f}%"
+            return f"{sign}{diff:.2f}"
+
         lines = [
             f"📊 BACKTEST RESULTS: {self.strategy_name}",
-            f"{'='*50}",
+            f"{'='*65}",
             f"",
             f"📅 PERIOD:",
             f"  • Start Date:      {self.start_date}",
             f"  • End Date:        {self.end_date}",
             f"  • Duration:        {self.years:.1f} years ({self.days} days)",
             f"",
-            f"💰 PERFORMANCE:",
-            f"  • Initial Capital: ${self.initial_capital:,.2f}",
-            f"  • Final Equity:    ${self.final_equity:,.2f}",
-            f"  • Total Return:    {self.total_return_pct:+.2f}%",
-            f"  • CAGR:            {self.cagr*100:+.2f}%",
-            f"",
-            f"📉 RISK METRICS:",
-            f"  • Max Drawdown:    {self.max_drawdown_pct:.2f}%",
-            f"  • Sharpe Ratio:    {self.sharpe_ratio:.2f}",
-            f"  • Sortino Ratio:   {self.sortino_ratio:.2f}",
-            f"",
-            f"📈 TRADES:",
-            f"  • Total Trades:    {self.trade_count}",
-            f"  • Win Rate:        {self.win_rate:.1f}%",
-            f"  • Assets:          {', '.join(self.symbols)}",
         ]
+
+        if benchmark and benchmark.strategy_name != self.strategy_name:
+            # Comparison Mode
+            lines.append(f"🆚 COMPARISON: vs {benchmark.strategy_name}")
+            lines.append(f"{'-'*70}")
+            # Truncate names to 15 chars to fit column
+            s_name = self.strategy_name[:15]
+            b_name = benchmark.strategy_name[:15]
+            lines.append(f"{'METRIC':<20} | {s_name:<15} | {b_name:<15} | {'DIFF':<8}")
+            lines.append(f"{'-'*70}")
+            
+            # Performance
+            lines.append(f"{'Total Return':<20} | {self.total_return_pct:>11.2f}% | {benchmark.total_return_pct:>11.2f}% | {fmt_diff(self.total_return_pct, benchmark.total_return_pct, False)}%")
+            lines.append(f"{'CAGR':<20} | {self.cagr*100:>11.2f}% | {benchmark.cagr*100:>11.2f}% | {fmt_diff(self.cagr, benchmark.cagr, True)}")
+            lines.append(f"{'Final Equity':<20} | ${self.final_equity:>11,.0f} | ${benchmark.final_equity:>11,.0f} | ${self.final_equity - benchmark.final_equity:,.0f}")
+            lines.append(f"",)
+            
+            # Risk
+            lines.append(f"{'Max Drawdown':<20} | {self.max_drawdown_pct:>11.2f}% | {benchmark.max_drawdown_pct:>11.2f}% | {fmt_diff(self.max_drawdown_pct, benchmark.max_drawdown_pct, False)}%")
+            lines.append(f"{'Volatility (Ann)':<20} | {self.volatility*100:>11.2f}% | {benchmark.volatility*100:>11.2f}% | {fmt_diff(self.volatility, benchmark.volatility, True)}")
+            lines.append(f"{'Sharpe Ratio':<20} | {self.sharpe_ratio:>12.2f} | {benchmark.sharpe_ratio:>12.2f} | {fmt_diff(self.sharpe_ratio, benchmark.sharpe_ratio)}")
+            lines.append(f"{'Sortino Ratio':<20} | {self.sortino_ratio:>12.2f} | {benchmark.sortino_ratio:>12.2f} | {fmt_diff(self.sortino_ratio, benchmark.sortino_ratio)}")
+            
+            # Stats
+            lines.append(f"{'Win Rate':<20} | {self.win_rate:>11.1f}% | {benchmark.win_rate:>11.1f}% | {fmt_diff(self.win_rate, benchmark.win_rate, False)}%")
+            lines.append(f"{'Trades':<20} | {self.trade_count:>12} | {benchmark.trade_count:>12} | {self.trade_count - benchmark.trade_count:+d}")
+
+            # Beta/Alpha (Benchmark is usually Market, so Alpha/Beta relative to it is strictly 1 and 0 if it IS the market, 
+            # but if we calculated beta/alpha against VTI, we show that separately below)
+            
+            lines.append(f"")
+            if hasattr(self, 'beta') and self.beta is not None:
+                lines.append(f"📉 ALPHA / BETA (vs VTI):")
+                lines.append(f"  • Beta:  {self.beta:.2f}")
+                lines.append(f"  • Alpha: {self.alpha*100:+.2f}%")
+
+        else:
+            # Standard Mode (No Benchmark comparison)
+            lines.append(f"💰 PERFORMANCE:")
+            lines.append(f"  • Initial Capital: ${self.initial_capital:,.2f}")
+            lines.append(f"  • Final Equity:    ${self.final_equity:,.2f}")
+            lines.append(f"  • Total Return:    {self.total_return_pct:+.2f}%")
+            lines.append(f"  • CAGR:            {self.cagr*100:+.2f}%")
+            lines.append(f"  • Total Dividends: ${self.total_dividends:,.2f}")
+            lines.append(f"")
+            lines.append(f"📉 RISK METRICS:")
+            lines.append(f"  • Volatility (Ann):{self.volatility*100:.2f}%")
+            lines.append(f"  • Max Drawdown:    {self.max_drawdown_pct:.2f}%")
+            lines.append(f"  • Sharpe Ratio:    {self.sharpe_ratio:.2f}")
+            lines.append(f"  • Sortino Ratio:   {self.sortino_ratio:.2f}")
+            
+            if hasattr(self, 'beta') and self.beta is not None:
+                 lines.append(f"  • Beta (vs VTI):   {self.beta:.2f}")
+                 lines.append(f"  • Alpha (vs VTI):  {self.alpha*100:+.2f}%")
+                 
+            lines.extend([
+                f"",
+                f"📈 TRADES:",
+                f"  • Total Trades:    {self.trade_count}",
+                f"  • Win Rate:        {self.win_rate:.1f}%",
+                f"  • Assets:          {', '.join(self.symbols)}",
+            ])
+            
         return "\n".join(lines)
     
     def __str__(self) -> str:
@@ -680,10 +988,11 @@ class Backtester:
                         continue
                     order.quantity = available / price
                     trade_value = order.quantity * price
-                    total_cost = trade_value + commission
+                    commission = self.commission * trade_value
                 
-                context.cash -= total_cost
-                context.positions[order.symbol].update(order.quantity, price)
+                if order.quantity > 0:
+                    context.record_buy(order.symbol, order.quantity, price, commission)
+                    context.positions[order.symbol].update(order.quantity, price)
                 
             else:  # SELL
                 position = context.positions.get(order.symbol)
@@ -692,7 +1001,7 @@ class Backtester:
                     order.quantity = position.quantity if position else 0
                 
                 if order.quantity > 0:
-                    context.cash += trade_value - commission
+                    context.record_sell(order.symbol, order.quantity, price, commission)
                     context.positions[order.symbol].update(-order.quantity, price)
             
             # Record trade
@@ -751,6 +1060,13 @@ class Backtester:
         # Initialize strategy
         self.strategy.on_init(context)
         
+        # Load dividend data for each symbol
+        from .read_data import load_dividends
+        dividend_data: Dict[str, Dict[date, float]] = {}
+        for symbol in self.symbols:
+            dividend_data[symbol] = load_dividends(symbol)
+        total_dividends = 0.0
+        
         # Withdrawal tracking
         days_since_withdrawal = self.withdrawal_period_days  # Trigger first withdrawal immediately if enabled
         total_withdrawn = 0.0
@@ -771,6 +1087,15 @@ class Backtester:
             # Execute orders
             self._execute_orders(context)
             
+            # Process dividends: add dividend income to cash
+            for symbol in self.symbols:
+                pos = context.positions.get(symbol)
+                if pos and pos.quantity > 0:
+                    div = dividend_data.get(symbol, {}).get(current_date, 0)
+                    if div > 0:
+                        context.record_dividend(symbol, pos.quantity, div)
+                        total_dividends += pos.quantity * div
+            
             # Periodic withdrawal (consumption)
             if self.withdrawal_amount > 0:
                 days_since_withdrawal += 1
@@ -787,8 +1112,6 @@ class Backtester:
                     
                     # Step 1: Use available cash first
                     cash_used = min(context.cash, withdrawal_needed)
-                    context.cash -= cash_used
-                    total_withdrawn += cash_used
                     remaining = withdrawal_needed - cash_used
                     
                     # Step 2: If still need more, sell assets
@@ -812,8 +1135,9 @@ class Backtester:
                                     sell_ratio = min(remaining / total_position_value, 1.0)
                                     sell_value = value * sell_ratio
                                     sell_qty = min(sell_value / price, pos.quantity)
-                                    pos.quantity -= sell_qty
-                                    total_withdrawn += sell_qty * price
+                                    if sell_qty > 0:
+                                        context.record_sell(symbol, sell_qty, price)
+                                        pos.quantity -= sell_qty
                             
                             elif self.withdrawal_method == "rebalance":
                                 # First sell from overweight positions (based on target allocation)
@@ -832,10 +1156,10 @@ class Backtester:
                                 for symbol, pos, price, value, excess in overweight:
                                     sell_value = min(excess, remaining)
                                     sell_qty = min(sell_value / price, pos.quantity)
-                                    pos.quantity -= sell_qty
-                                    sold_amount = sell_qty * price
-                                    remaining -= sold_amount
-                                    total_withdrawn += sold_amount
+                                    if sell_qty > 0:
+                                        context.record_sell(symbol, sell_qty, price)
+                                        pos.quantity -= sell_qty
+                                        remaining -= sell_qty * price
                                     if remaining <= 0:
                                         break
                                 
@@ -854,9 +1178,9 @@ class Backtester:
                                             sell_ratio = min(remaining / total_remaining_value, 1.0)
                                             sell_value = value * sell_ratio
                                             sell_qty = min(sell_value / price, pos.quantity)
-                                            pos.quantity -= sell_qty
-                                            sold_amount = sell_qty * price
-                                            total_withdrawn += sold_amount
+                                            if sell_qty > 0:
+                                                context.record_sell(symbol, sell_qty, price)
+                                                pos.quantity -= sell_qty
                                         remaining = 0
                             
                             elif self.withdrawal_method == "sell_winners":
@@ -874,10 +1198,10 @@ class Backtester:
                                 for symbol, pos, price, value, ret in sorted_positions:
                                     sell_value = min(value, remaining)
                                     sell_qty = min(sell_value / price, pos.quantity)
-                                    pos.quantity -= sell_qty
-                                    sold_amount = sell_qty * price
-                                    remaining -= sold_amount
-                                    total_withdrawn += sold_amount
+                                    if sell_qty > 0:
+                                        context.record_sell(symbol, sell_qty, price)
+                                        pos.quantity -= sell_qty
+                                        remaining -= sell_qty * price
                                     if remaining <= 0:
                                         break
                             
@@ -895,14 +1219,18 @@ class Backtester:
                                 for symbol, pos, price, value, ret in sorted_positions:
                                     sell_value = min(value, remaining)
                                     sell_qty = min(sell_value / price, pos.quantity)
-                                    pos.quantity -= sell_qty
-                                    sold_amount = sell_qty * price
-                                    remaining -= sold_amount
-                                    total_withdrawn += sold_amount
+                                    if sell_qty > 0:
+                                        context.record_sell(symbol, sell_qty, price)
+                                        pos.quantity -= sell_qty
+                                        remaining -= sell_qty * price
                                     if remaining <= 0:
                                         break
                     
                     days_since_withdrawal = 0
+                    
+                    # Step 3: Deduct total withdrawal from cash
+                    context.record_withdrawal(withdrawal_needed)
+                    total_withdrawn += withdrawal_needed
             
             # Record equity with allocation
             equity = context.equity
@@ -936,7 +1264,9 @@ class Backtester:
             initial_capital=self.initial_capital,
             final_equity=context.equity,
             equity_curve=context.equity_curve,
-            trades=context.trades
+            trades=context.trades,
+            total_dividends=total_dividends,
+            transaction_log=context.transaction_log
         )
 
 
