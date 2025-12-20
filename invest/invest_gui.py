@@ -3,10 +3,21 @@ from functools import lru_cache, reduce
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                            QHBoxLayout, QGridLayout, QLabel, QSlider, 
-                            QCheckBox, QPushButton, QTextEdit, QComboBox)
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QGridLayout,
+    QLabel,
+    QSlider,
+    QCheckBox,
+    QPushButton,
+    QTextEdit,
+    QComboBox,
+)
 
 from .invest_simulator import InvestmentParams, StrategyBasic, InvestmentYearsResult
 from .read_data import (
@@ -269,7 +280,9 @@ class InvestmentControlPanel(QWidget):
         stock_dir = data_path("STOCK")
         asset_codes = []
         if stock_dir.exists():
-            asset_codes = sorted(p.stem for p in stock_dir.glob("*.csv"))
+            asset_codes = sorted(
+                p.stem for p in stock_dir.glob("*.csv") if not p.name.startswith(".")
+            )
         asset_codes = ["portfolio"] + [c for c in asset_codes if c]
         
         # Stock Code Selection

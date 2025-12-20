@@ -181,7 +181,7 @@ def analysis(args=None):
         
     if args.code_list:
         stock_dir = data_path("STOCK")
-        codes = [p.stem for p in stock_dir.glob("*.csv")]
+        codes = [p.stem for p in stock_dir.glob("*.csv") if not p.name.startswith(".")]
         print("Available stock codes:")
         for code in codes:
             print(f" - {code}")

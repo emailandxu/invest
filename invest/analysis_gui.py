@@ -8,8 +8,8 @@ try:
     from pyqtgraph.graphicsItems.DateAxisItem import DateAxisItem as PGDateAxisItem
 except Exception:  # fallback for older pyqtgraph
     PGDateAxisItem = None
-from PyQt5.QtCore import Qt, QTimer, QDate
-from PyQt5.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer, QDate
+from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,

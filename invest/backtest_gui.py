@@ -1,7 +1,7 @@
 """
 Backtest GUI - Standalone window for running backtests.
 
-This module provides a PyQt5-based GUI for:
+This module provides a Qt-based GUI (PySide6) for:
 - Selecting and configuring trading strategies
 - Running backtests with customizable parameters  
 - Visualizing equity curves and performance metrics
@@ -14,14 +14,13 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtWidgets import (
+from PySide6.QtCore import Qt, QDate, QTimer
+from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QLabel, QComboBox, QPushButton, QTextEdit,
     QSpinBox, QDoubleSpinBox, QDateEdit, QListWidget, QListWidgetItem,
     QAbstractItemView, QSplitter, QGroupBox, QCheckBox, QMessageBox
 )
-from PyQt5.QtCore import QDate
 
 from .backtest import Backtester, BacktestResult, StrategyRegistry
 from ._paths import data_path
@@ -318,6 +317,8 @@ class BacktestControlPanel(QWidget):
         
         if stock_dir.exists():
             for csv_file in sorted(stock_dir.glob("*.csv")):
+                if csv_file.name.startswith("."):
+                    continue
                 if csv_file.name.endswith("_dividends.csv"):
                     continue
                 item = QListWidgetItem(csv_file.stem)
@@ -357,6 +358,10 @@ class BacktestControlPanel(QWidget):
             self.allocation_layout.addWidget(spinbox, row, 1)
             self.allocation_sliders[symbol] = spinbox
     
+    def _on_allocation_change(self):
+        # Allocation change hook; currently used when loading saved portfolios.
+        return
+
     def get_allocation(self) -> dict:
         """Get current allocation weights as a dict (symbol -> weight 0-1)."""
         allocation = {}
@@ -601,7 +606,7 @@ class BacktestControlPanel(QWidget):
 
     def _on_save_portfolio(self):
         """Save current configuration as a new portfolio."""
-        from PyQt5.QtWidgets import QInputDialog, QMessageBox
+        from PySide6.QtWidgets import QInputDialog, QMessageBox
         from .portfolio_manager import PortfolioManager, PortfolioConfig
         
         # Pre-fill with current selection if valid
@@ -650,7 +655,7 @@ class BacktestControlPanel(QWidget):
 
     def _on_delete_portfolio(self):
         """Delete current portfolio."""
-        from PyQt5.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QMessageBox
         from .portfolio_manager import PortfolioManager
         
         name = self.portfolio_combo.currentText()
@@ -1199,7 +1204,7 @@ class BacktestWindow(QMainWindow):
 
     
     def _setup_ui(self):
-        from PyQt5.QtWidgets import QTabWidget
+        from PySide6.QtWidgets import QTabWidget
         from .compare_gui import ComparisonWidget
         
         self.tabs = QTabWidget()
@@ -1254,7 +1259,7 @@ class BacktestWindow(QMainWindow):
         allocation = self.control_panel.get_allocation()
         
         if not strategy_name or not assets:
-            self.results_panel.results_text.setPlainText(
+            self.report_window.results_text.setPlainText(
                 "Error: Please select a strategy and at least one asset."
             )
             return
@@ -1271,7 +1276,7 @@ class BacktestWindow(QMainWindow):
             strategy = StrategyRegistry.create(strategy_name, **strategy_params)
         
         if not strategy:
-            self.results_panel.results_text.setPlainText(
+            self.report_window.results_text.setPlainText(
                 f"Error: Could not create strategy '{strategy_name}'"
             )
             return

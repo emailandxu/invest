@@ -3,14 +3,14 @@ from typing import List, Dict
 import pandas as pd
 import numpy as np
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QListWidget, QListWidgetItem, QPushButton, 
     QDateEdit, QDoubleSpinBox, QGroupBox, QTableWidget, 
     QTableWidgetItem, QHeaderView, QMessageBox,
     QSpinBox, QCheckBox, QComboBox, QGridLayout
 )
-from PyQt5.QtCore import Qt, QDate
+from PySide6.QtCore import Qt, QDate
 import pyqtgraph as pg
 
 from .portfolio_manager import PortfolioManager, PortfolioConfig
@@ -165,8 +165,8 @@ class ComparisonControlPanel(QWidget):
         }
         
         return {
-            'start_date': self.start_date.date().toPyDate(),
-            'end_date': self.end_date.date().toPyDate(),
+            'start_date': self.start_date.date().toPython(),
+            'end_date': self.end_date.date().toPython(),
             'capital': self.capital_spin.value(),
             'withdrawal_amount': self.withdrawal_amount.value(),
             'withdrawal_period_days': self.withdrawal_period.value(),
@@ -536,4 +536,3 @@ class ComparisonWidget(QWidget):
             QMessageBox.critical(self, "Error", f"Comparison failed: {e}")
             import traceback
             traceback.print_exc()
-
