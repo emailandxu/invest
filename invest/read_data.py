@@ -451,6 +451,9 @@ def load_dividends(code: str) -> Dict[date, float]:
     
     csv_path = data_path("STOCK", f"{code}_dividends.csv")
     if not csv_path.exists():
+        # Only warn for non-CASH symbols
+        if code != "CASH":
+            print(f"Warning: Dividend file missing for {code}. Backtest returns may be lower than expected.")
         return {}
     
     dividends = {}

@@ -195,7 +195,6 @@ class ComparisonResultWidget(QWidget):
         self.equity_plot.setLabel('left', 'Equity ($)')
         self.equity_plot.showGrid(x=True, y=True, alpha=0.3)
         self.equity_plot.addLegend()
-        self.equity_plot.setBackground('w')
         plot_layout.addWidget(self.equity_plot, stretch=2)
         
         # Drawdown Plot
@@ -203,7 +202,6 @@ class ComparisonResultWidget(QWidget):
         self.drawdown_plot.setTitle("Drawdown")
         self.drawdown_plot.setLabel('left', 'Drawdown (%)')
         self.drawdown_plot.showGrid(x=True, y=True, alpha=0.3)
-        self.drawdown_plot.setBackground('w')
         plot_layout.addWidget(self.drawdown_plot, stretch=1)
         
         # Link X-Axis
@@ -213,21 +211,21 @@ class ComparisonResultWidget(QWidget):
         
         # --- Tooltips ---
         # Equity Tooltip
-        self.equity_vline = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen('#555', style=Qt.DashLine))
+        self.equity_vline = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen('#888', style=Qt.DashLine))
         self.equity_plot.addItem(self.equity_vline, ignoreBounds=True)
         self.equity_vline.setVisible(False)
         
-        self.equity_label = pg.TextItem(anchor=(0, 0), fill=pg.mkBrush(255, 255, 255, 220), color='#000')
+        self.equity_label = pg.TextItem(anchor=(0, 0), fill=pg.mkBrush('#333'), color='#EEE')
         self.equity_plot.addItem(self.equity_label, ignoreBounds=True)
         self.equity_label.setVisible(False)
         self.equity_plot.scene().sigMouseMoved.connect(self._on_equity_hover)
         
         # Drawdown Tooltip
-        self.drawdown_vline = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen('#555', style=Qt.DashLine))
+        self.drawdown_vline = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen('#888', style=Qt.DashLine))
         self.drawdown_plot.addItem(self.drawdown_vline, ignoreBounds=True)
         self.drawdown_vline.setVisible(False)
         
-        self.drawdown_label = pg.TextItem(anchor=(0, 0), fill=pg.mkBrush(255, 255, 255, 220), color='#000')
+        self.drawdown_label = pg.TextItem(anchor=(0, 0), fill=pg.mkBrush('#333'), color='#EEE')
         self.drawdown_plot.addItem(self.drawdown_label, ignoreBounds=True)
         self.drawdown_label.setVisible(False)
         self.drawdown_plot.scene().sigMouseMoved.connect(self._on_drawdown_hover)

@@ -371,3 +371,79 @@ class DollarCostAverageStrategy(Strategy):
         for symbol in available_symbols:
             if context.cash >= amount_per_symbol:
                 context.buy_value(symbol, amount_per_symbol)
+
+
+@register_strategy
+class ThresholdRebalanceStrategy(Strategy):
+    """
+    Threshold Rebalancing Strategy.
+    
+    Rebalances to target weights only when any asset's weight 
+    deviates from the target by more than a specified threshold.
+    """
+    
+    name = "Threshold Rebalance"
+    description = "Rebalance only when weights deviate by more than threshold"
+    parameters = [
+        StrategyParameter("threshold", "Deviation Threshold", "float", 0.05, 0.01, 0.3, 0.01),
+        StrategyParameter("check_period", "Check Period (Days)", "int", 1, 1, 252, 1),
+    ]
+    
+    def __init__(self, 
+                 allocation: Dict[str, float] = None,
+                 threshold: float = 0.05,
+                 check_period: int = 1):
+        """
+        Args:
+            allocation: Dict mapping symbol to target weight (0-1).
+                       If None, equal weight.
+            threshold: Maximum allowed deviation (e.g. 0.05 for 5%)
+            check_period: How often to check for rebalancing (default: daily)
+        """
+        self.allocation = allocation
+        self.threshold = threshold
+        self.check_period = check_period
+    
+    def on_init(self, context: BacktestContext) -> None:
+        context.set_state("days_since_check", self.check_period)  # Trigger initial buy
+    
+    def on_bar(self, context: BacktestContext, bars: Dict[str, Bar]) -> None:
+        days = context.get_state("days_since_check", 0)
+        days += 1
+        
+        if days >= self.check_period:
+            self._check_and_rebalance(context, bars)
+            days = 0
+        
+        context.set_state("days_since_check", days)
+    
+    def _check_and_rebalance(self, context: BacktestContext, bars: Dict[str, Bar]):
+        """Check deviations and execute rebalancing if needed."""
+        if self.allocation:
+            alloc = self.allocation
+        else:
+            n = len(context.symbols)
+            alloc = {s: 1.0 / n for s in context.symbols}
+        
+        total_equity = context.equity
+        if total_equity <= 0:
+            return
+
+        should_rebalance = False
+        
+        # Check current weights
+        for symbol, target_pct in alloc.items():
+            pos = context.get_position(symbol)
+            price = context.get_price(symbol)
+            current_val = pos.quantity * price
+            current_pct = current_val / total_equity
+            
+            if abs(current_pct - target_pct) > self.threshold:
+                should_rebalance = True
+                break
+        
+        if should_rebalance:
+            for symbol in context.symbols:
+                if symbol in bars:
+                    target_pct = alloc.get(symbol, 0)
+                    context.target_percent(symbol, target_pct)

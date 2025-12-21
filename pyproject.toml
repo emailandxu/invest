@@ -18,7 +18,6 @@ dependencies = [
 
 [project.gui-scripts]
 invest-gui = "invest:main"
-invest-agui = "invest.analysis_gui:main"
 invest-backtest = "invest.backtest_gui:main"
 invest-ana = "invest:analysis"
 invest-download = "invest:download_data"

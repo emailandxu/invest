@@ -749,13 +749,14 @@ class BacktestResult:
             
         return np.std(returns) * np.sqrt(252)
 
-    def calculate_benchmark_metrics(self, benchmark_prices: List[float], benchmark_dates: List[date]):
+    def calculate_benchmark_metrics(self, benchmark_prices: List[float], benchmark_dates: List[date], symbol: str = "VTI"):
         """
-        Calculate Beta and Alpha against a benchmark series.
+        Calculate Beta and Alpha against a benchmark series (considering dividends and RF rate).
         
         Args:
             benchmark_prices: List of benchmark closing prices
             benchmark_dates: List of corresponding dates
+            symbol: Benchmark ticker symbol for loading dividends
         """
         if not self.equity_curve or not benchmark_prices:
             return
@@ -769,30 +770,69 @@ class BacktestResult:
         
         if len(common_dates) < 2:
             return
+
+        # Load Risk Free Rates
+        rf_data = {}
+        try:
+            from .read_data import load_rf_rates
+            rf_data = load_rf_rates()
+        except Exception:
+            pass
+
+        # Load Benchmark Dividends to create Total Return Index
+        divs = {}
+        try:
+            from .read_data import load_dividends
+            divs = load_dividends(symbol)
+        except Exception:
+            pass
+        
+        # Construct Benchmark Total Return series
+        bench_tr = [1.0]
+        current_tr = 1.0
+        for i in range(1, len(common_dates)):
+            d = common_dates[i]
+            prev_d = common_dates[i-1]
+            p = benchmark_series[d]
+            prev_p = benchmark_series[prev_d]
             
-        # Extract aligned prices
+            # Daily return including dividend
+            div = divs.get(d, 0)
+            day_ret = (p + div) / prev_p - 1
+            current_tr *= (1 + day_ret)
+            bench_tr.append(current_tr)
+        
+        bench_tr = np.array(bench_tr)
+        
+        # Strategy Prices (already total TR)
         strat_prices = np.array([strategy_series[d] for d in common_dates])
-        bench_prices = np.array([benchmark_series[d] for d in common_dates])
         
-        # Calculate returns
+        # Daily Returns
         strat_returns = np.diff(strat_prices) / strat_prices[:-1]
-        bench_returns = np.diff(bench_prices) / bench_prices[:-1]
+        bench_returns = np.diff(bench_tr) / bench_tr[:-1]
         
-        if len(strat_returns) == 0 or np.var(bench_returns) == 0:
+        # Calculate Aligned Excess Returns
+        strat_excess = []
+        bench_excess = []
+        for i, d in enumerate(common_dates[1:]):
+            rf = rf_data.get(d, 0.0) 
+            daily_rf = rf / 252.0
+            strat_excess.append(strat_returns[i] - daily_rf)
+            bench_excess.append(bench_returns[i] - daily_rf)
+            
+        strat_excess = np.array(strat_excess)
+        bench_excess = np.array(bench_excess)
+        
+        if len(strat_excess) == 0 or np.var(bench_excess) == 0:
             return
             
-        # Calculate Beta: Covariance / Variance
-        # Use ddof=1 for unbiased estimator to match np.cov default
-        covariance = np.cov(strat_returns, bench_returns)[0][1]
-        variance = np.var(bench_returns, ddof=1)
+        # Beta: Covariance / Variance (on excess returns)
+        covariance = np.cov(strat_excess, bench_excess)[0][1]
+        variance = np.var(bench_excess, ddof=1)
         self.beta = covariance / variance
         
-        # Calculate Alpha (Annualized): Strategy Return - Beta * Benchmark Return
-        # Assuming Risk Free Rate approx 0 for simplicity in this contest
-        strat_ann_ret = np.mean(strat_returns) * 252
-        bench_ann_ret = np.mean(bench_returns) * 252
-        
-        self.alpha = strat_ann_ret - (self.beta * bench_ann_ret)
+        # Alpha (Annualized Jensen's Alpha): Mean(R_p - R_f) - Beta * Mean(R_m - R_f)
+        self.alpha = (np.mean(strat_excess) - self.beta * np.mean(bench_excess)) * 252
 
     def summary(self, benchmark: 'BacktestResult' = None) -> str:
         """Generate a summary report string."""

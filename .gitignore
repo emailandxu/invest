@@ -32,3 +32,7 @@ invest/data/STOCK/*
 invest/data/ibkr/*
 
 cpp/*
+
+# Office temporary files
+~$*.xlsx
+*.tmp

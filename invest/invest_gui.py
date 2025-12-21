@@ -578,7 +578,10 @@ class InvestmentPlotPanel(QWidget):
         if self.show_benchmark and years_result is not None:
             self.draw_benchmark_plots(years_result)
         
-        
+        # Auto-range all plots to fit the data
+        for plot in self.plots:
+            plot.autoRange()
+    
     def draw_benchmark_plots(self, years_result: InvestmentYearsResult):
         years = years_result.series('year')
         self.plot_total.plot(years, years_result.get_benchmark_total(), 

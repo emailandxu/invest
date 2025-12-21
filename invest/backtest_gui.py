@@ -934,6 +934,11 @@ class BacktestPlotPanel(QWidget):
         # Re-add hover elements after clear
         self.allocation_plot.addItem(self.allocation_vline, ignoreBounds=True)
         self.allocation_plot.addItem(self.allocation_label, ignoreBounds=True)
+        
+        # Auto-range to fit the data
+        self.equity_plot.autoRange()
+        self.drawdown_plot.autoRange()
+        self.allocation_plot.autoRange()
     
     def _on_allocation_hover(self, pos):
         """Handle mouse hover over allocation chart."""

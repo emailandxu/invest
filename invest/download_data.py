@@ -26,7 +26,7 @@ def download_data(args=None):
 
     if hasattr(args, "update_all") and args.update_all:
         update_all()
-    if hasattr(args, "update") and args.update:
+    elif hasattr(args, "update") and args.update:
         update_code(args.code)
     else:
         _download_data(args)
@@ -34,6 +34,9 @@ def download_data(args=None):
 def _download_data(args):
     # 使用命令行参数
     code = args.code
+    if not code:
+        print("Error: No stock code specified for download.")
+        return
     start = args.start if hasattr(args, 'start') else "2025-10-01"
     end = args.end if hasattr(args, 'end') else datetime.date.today().isoformat()
 
@@ -118,6 +121,8 @@ def update_code(code):
     print(f"Updating {code}: {start} → {today}")
     try:
         _download_data(args)
+        # Automatically sync dividends whenever we update price data
+        download_dividends(code)
     except Exception as e:
         print(f"Failed to update {code}: {e}")
 
@@ -148,7 +153,8 @@ def download_dividends(code: str):
     except Exception as e:
         print(f"Failed to download dividends for {code}: {e}")
 
-
+def update_all_dividends():
+    """Update dividend CSVs for all stocks found in data/STOCK."""
     stock_dir = data_path("STOCK")
     for csv_path in sorted(stock_dir.glob("*.csv")):
         if csv_path.name.startswith(".") or "_dividends" in csv_path.name:
