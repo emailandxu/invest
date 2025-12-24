@@ -14,7 +14,6 @@ def cli_parser():
     parser.add_argument("--code", help="Stock code to download (e.g., VTSAX)")
     parser.add_argument("--start", default="1970-01-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", default=datetime.date.today().isoformat(), help="End date (YYYY-MM-DD)")
-    parser.add_argument("--update", action="store_true", help="Update existing stock CSV")
     parser.add_argument("--update_all", action="store_true", help="Update existing stock CSVs under data/STOCK")
     # 解析命令行参数
     args = parser.parse_args()
@@ -26,10 +25,8 @@ def download_data(args=None):
 
     if hasattr(args, "update_all") and args.update_all:
         update_all()
-    elif hasattr(args, "update") and args.update:
-        update_code(args.code)
     else:
-        _download_data(args)
+        update_code(args.code)
 
 def _download_data(args):
     # 使用命令行参数
