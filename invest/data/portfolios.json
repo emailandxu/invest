@@ -5,14 +5,12 @@
     "assets": [
       "BRK-B",
       "GLD",
-      "QQQ",
-      "VTI"
+      "QQQ"
     ],
     "allocation": {
-      "BRK-B": 0.12,
-      "GLD": 0.5,
-      "QQQ": 0.12,
-      "VTI": 0.26
+      "BRK-B": 0.29,
+      "GLD": 0.42,
+      "QQQ": 0.29
     },
     "strategy_params": {
       "rebalance_days": 252
@@ -53,8 +51,8 @@
     },
     "note": ""
   },
-  "VTI100%": {
-    "name": "VTI100%",
+  "VTI": {
+    "name": "VTI",
     "strategy_name": "Periodic Rebalance",
     "assets": [
       "VTI"
@@ -103,8 +101,8 @@
     },
     "note": ""
   },
-  "QQQ100%": {
-    "name": "QQQ100%",
+  "QQQ": {
+    "name": "QQQ",
     "strategy_name": "Periodic Rebalance",
     "assets": [
       "QQQ"
@@ -117,8 +115,8 @@
     },
     "note": ""
   },
-  "BRK-B100%": {
-    "name": "BRK-B100%",
+  "BRK-B": {
+    "name": "BRK-B",
     "strategy_name": "Buy and Hold",
     "assets": [
       "BRK-B"
@@ -129,8 +127,8 @@
     "strategy_params": {},
     "note": ""
   },
-  "GLD100%": {
-    "name": "GLD100%",
+  "GLD": {
+    "name": "GLD",
     "strategy_name": "Buy and Hold",
     "assets": [
       "GLD"
@@ -192,6 +190,86 @@
     },
     "strategy_params": {
       "rebalance_days": 252
+    },
+    "note": ""
+  },
+  "ASHR": {
+    "name": "ASHR",
+    "strategy_name": "Periodic Rebalance",
+    "assets": [
+      "ASHR"
+    ],
+    "allocation": {
+      "ASHR": 1.0
+    },
+    "strategy_params": {
+      "rebalance_days": 252
+    },
+    "note": ""
+  },
+  "线上策略B": {
+    "name": "线上策略B",
+    "strategy_name": "Periodic Rebalance",
+    "assets": [
+      "BND",
+      "GLD",
+      "QQQ",
+      "BRK-B"
+    ],
+    "allocation": {
+      "BND": 0.21,
+      "BRK-B": 0.29,
+      "GLD": 0.21,
+      "QQQ": 0.29
+    },
+    "strategy_params": {
+      "rebalance_days": 252
+    },
+    "note": ""
+  },
+  "线上策略C": {
+    "name": "线上策略C",
+    "strategy_name": "Periodic Rebalance",
+    "assets": [
+      "BND",
+      "QQQ",
+      "BRK-B"
+    ],
+    "allocation": {
+      "BND": 0.42,
+      "BRK-B": 0.29,
+      "QQQ": 0.29
+    },
+    "strategy_params": {
+      "rebalance_days": 252
+    },
+    "note": ""
+  },
+  "BND": {
+    "name": "BND",
+    "strategy_name": "Periodic Rebalance",
+    "assets": [
+      "BND"
+    ],
+    "allocation": {
+      "BND": 1.0
+    },
+    "strategy_params": {
+      "rebalance_days": 252
+    },
+    "note": ""
+  },
+  "SGOV": {
+    "name": "SGOV",
+    "strategy_name": "Periodic Rebalance",
+    "assets": [
+      "SGOV"
+    ],
+    "allocation": {
+      "SGOV": 1.0
+    },
+    "strategy_params": {
+      "rebalance_days": 22
     },
     "note": ""
   }
