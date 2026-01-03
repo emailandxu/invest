@@ -1589,8 +1589,23 @@ class BacktestWindow(QMainWindow):
                 res = backtester.run()
                 res.strategy_name = config.name # Override name with pinned alias
                 results[config.name] = res
-                
-
+            
+            # Calculate Alpha/Beta against VTI benchmark
+            try:
+                from .read_data import stock_data_daily
+                vti_bars = stock_data_daily("VTI")
+                # Filter to date range
+                vti_filtered = [
+                    bar for bar in vti_bars
+                    if start_date <= bar.date <= end_date
+                ]
+                if vti_filtered:
+                    vti_prices = [bar.close for bar in vti_filtered]
+                    vti_dates = [bar.date for bar in vti_filtered]
+                    for res in results.values():
+                        res.calculate_benchmark_metrics(vti_prices, vti_dates, "VTI")
+            except Exception as e:
+                print(f"Warning: Could not calculate Alpha/Beta: {e}")
             
             # Update UI
             self.plot_panel.update_plots(results)
